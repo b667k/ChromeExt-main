@@ -1,5 +1,4 @@
-// .js (FULL UPDATED - frame-aware + strong reset + latest-wins + req-aware RUN_NOW + PING + visible-input-only +
-//          wait-not-loading + blur-commit + active-element latch + CLAIM AWARENESS)
+// .js (FULL UPDATED - race-condition-fix + pending-queue + strong reset + latest-wins + req-aware)
 
 (() => {
   const DEBUG = true;
@@ -247,10 +246,6 @@
     } catch {}
   }
 
-  function isOnClaimScreen() {
-    return CLAIM_SCREEN_MARKERS.some((s) => !!document.querySelector(s));
-  }
-
   function isOnLossDetails() {
     return LOSS_DETAILS_SCREENS.some((s) => !!document.querySelector(s));
   }
@@ -292,15 +287,14 @@
   // --- State Management ---
 
   let running = false;
+  let hasPendingRun = false; // <--- NEW: Race condition fix
   let lastSeenKick = -1;
 
   async function getState() {
-    // Added 'lastClaim' to tracking
     return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
   }
 
   async function setSuccessState(req, claim) {
-    // Save both req AND claim so we don't block next claim if req is same
     await chrome.storage.local.set({ lastReq: req, lastClaim: claim });
   }
 
@@ -341,7 +335,7 @@
       try { input.focus(); } catch {}
       await sleep(15);
       
-      // Strict active element check to ensure we are typing in the right place
+      // Strict active element check
       if (document.activeElement !== input) {
         await sleep(checkEveryMs);
         continue;
@@ -487,6 +481,14 @@
   // --- Scheduler ---
   let scheduled = false;
   function schedule(ms = 0) {
+    // RACE CONDITION FIX:
+    // If we are currently running, don't just ignore.
+    // Flag that we need to run AGAIN as soon as we finish.
+    if (running) {
+      hasPendingRun = true;
+      return;
+    }
+
     if (scheduled) return;
     scheduled = true;
     setTimeout(() => {
@@ -497,48 +499,47 @@
 
   // --- Main Loop ---
   async function runLoop() {
-    if (running) return;
+    // Guard: already running?
+    if (running) {
+        hasPendingRun = true;
+        return;
+    }
+    
     running = true;
+    hasPendingRun = false; // Reset pending flag as we start
 
     try {
       while (true) {
-        // 1. Get State including lastClaim
+        // 1. Get State
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
 
         if (!handoff?.claim || !handoff?.req) return;
         if (ownerReq !== handoff.req) return;
 
         // 2. Gatekeeper:
-        //    If we already processed this EXACT req AND claim, waiting for a kick.
-        //    CRITICAL FIX: If claim changed, we run, even if req is same.
         const alreadyDone = (lastReq === handoff.req && lastClaim === handoff.claim);
         if (alreadyDone && kick === lastSeenKick) return;
 
-        // Update local kicker
         lastSeenKick = kick;
-
         const req = handoff.req;
         const claim = handoff.claim;
 
-        // Check environment (UI Frame) inside loop for robustness
         if (!hasGuidewireUi()) {
-           LOG.warn("UI not ready yet...");
+           LOG.warn("UI not ready, waiting...");
            await sleep(500);
-           // If it's been a while, we might be in a non-UI frame after all? 
-           // But we continue to try in case of slow load.
            continue; 
         }
 
-        LOG.info("CC run start", { claim, req, kick, alreadyDone });
+        LOG.info("CC run start", { claim, req, kick });
 
         const input = await ensureOnSimpleSearch();
         if (!input) {
-          LOG.warn("No Simple Claim input; retrying soon");
+          LOG.warn("No Simple Claim input; retrying");
           await sleep(650);
           continue;
         }
 
-        if (!(await stillOwner(req))) { schedule(0); return; }
+        if (!(await stillOwner(req))) { return; } // Handled by finally/pending check
         await waitForNotLoading(9000);
 
         const latched = await setAndLatchClaimValue(claim, {
@@ -546,16 +547,16 @@
         });
 
         if (!latched) {
-          LOG.warn("Could not latch claim value; retrying soon");
+          LOG.warn("Claim latch failed");
           await sleep(420);
           continue;
         }
 
-        if (!(await stillOwner(req))) { schedule(0); return; }
+        if (!(await stillOwner(req))) { return; }
 
         const fired = await submitSearchReliable(claim, req);
         if (!fired) {
-          LOG.warn("Search not started; retrying soon");
+          LOG.warn("Search start failed");
           await sleep(600);
           continue;
         }
@@ -564,48 +565,56 @@
           latchMs: 720, checkEveryMs: 85, logLabel: "PostSearchClaimInput", req
         });
 
-        if (!(await stillOwner(req))) { schedule(0); return; }
+        if (!(await stillOwner(req))) { return; }
 
         const row0 = await waitSel(ROW0, WAIT_ROW0_MS, { mustBeVisible: true });
         if (!row0) {
-          LOG.warn("No row0 yet; retrying soon");
+          LOG.warn("Row0 not found");
           await sleep(650);
           continue;
         }
 
         const opened = await openClaimFromRow0_Fast(req);
         if (!opened) {
-          LOG.warn("Row0 didn't open claim; retrying soon");
+          LOG.warn("Row0 click failed");
           await sleep(650);
           continue;
         }
 
-        if (!(await stillOwner(req))) { schedule(0); return; }
+        if (!(await stillOwner(req))) { return; }
 
         const clicked = await clickLossDetailsReliable(req);
         if (!clicked) {
-          LOG.warn("Could not click Loss Details; retrying soon");
+          LOG.warn("Loss Details click failed");
           await sleep(750);
           continue;
         }
 
         const ok = isOnLossDetails() || !!(await waitAny(LOSS_DETAILS_SCREENS, WAIT_LOSS_SCREEN_MS));
         if (!ok) {
-          LOG.warn("Loss Details not detected; retrying soon");
+          LOG.warn("Loss Details not detected");
           await sleep(800);
           continue;
         }
 
-        // 3. Success: Save both REQ and CLAIM
+        // 3. Success
         await setSuccessState(req, claim);
         LOG.info("✅ SUCCESS", claim, req, "kick", kick);
         return;
       }
     } catch (e) {
       LOG.err("Run crashed:", e?.message || e);
+      // If we crashed, assume we need to try again later
       schedule(900);
     } finally {
       running = false;
+      // RACE CONDITION RESOLUTION:
+      // If a request came in WHILE we were running, we scheduled it via hasPendingRun.
+      // Trigger it now.
+      if (hasPendingRun) {
+        LOG.info("Pending run detected, restarting loop immediately.");
+        schedule(50);
+      }
     }
   }
 
@@ -617,7 +626,6 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    // Basic ping
     if (msg?.type === "PING_TM") {
       try {
         sendResponse({
@@ -640,9 +648,6 @@
     schedule(0);
   });
 
-  // Entry point check:
-  // We check IS_PROCESS immediately, but we relax the IS_UI_FRAME check 
-  // to allow the script to load and wait for DOM in the loop if needed.
   if (!shouldProcessThisTab()) return;
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -650,7 +655,6 @@
     if (changes.ownerReq || changes.kick || changes.handoff) schedule(0);
   });
 
-  // Startup Kick
   schedule(650);
   schedule(1600);
 })();
