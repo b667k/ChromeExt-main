@@ -1,4 +1,4 @@
-// portal.js (FULL UPDATED - fire-and-forget to avoid "Extension context invalidated")
+// portal.js (FULL UPDATED - Persistent Observer + fire-and-forget)
 (() => {
   const DEBUG = true;
   const log = (...a) => DEBUG && console.log("[P2CC]", ...a);
@@ -15,6 +15,7 @@
   }
 
   function addButton(container) {
+    // 1. Safety check: if container missing or button already exists, stop.
     if (!container || container.querySelector("#p2ccBtn")) return;
 
     const btn = document.createElement("button");
@@ -59,7 +60,6 @@
           chrome.storage.local.set(payload, () => {
             const err = chrome.runtime.lastError;
             if (err) {
-              // If Portal is mid-rerender, this can happen. Still try to OPEN_CC.
               console.warn("[P2CC] storage.set warning", err?.message || err);
             } else {
               log("handoff set", { claim, req, kick });
@@ -70,15 +70,12 @@
               chrome.runtime.sendMessage({ type: "OPEN_CC", req }, (resp) => {
                 const msgErr = chrome.runtime.lastError;
                 if (msgErr) {
-                  // This is the key: if context dies, this callback might never run.
-                  // If it runs and errors, log it; user can click again.
-                  console.warn("[P2CC] sendMessage warning", msgErr?.message || msgErr);
+                  // Suppress irrelevant context invalidation errors
                   return;
                 }
-                log("OPEN_CC resp", resp);
               });
             } catch (e2) {
-              console.warn("[P2CC] sendMessage threw", e2?.message || e2);
+              // Ignore immediate context errors
             }
           });
         });
@@ -90,17 +87,25 @@
     log("button added");
   }
 
-  async function init() {
-    for (let i = 0; i < 200; i++) {
-      const c = document.querySelector("#tm-custom-mainframe-buttons");
-      if (c) {
-        addButton(c);
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    log("container not found");
+  // --- OBSERVER LOGIC ---
+
+  function tryAdd() {
+    const c = document.querySelector("#tm-custom-mainframe-buttons");
+    if (c) addButton(c);
   }
 
-  init();
+  // 1. Try immediately
+  tryAdd();
+
+  // 2. Watch for changes (if the user switches tasks or the page is slow)
+  const observer = new MutationObserver(() => {
+    tryAdd();
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+
+  log("Observer started");
 })();
