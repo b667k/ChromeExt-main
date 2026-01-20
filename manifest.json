@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Portal ↔ ClaimCenter Automation",
+  "author": "Blaine Oler",
+  "version": "1.0.5",
+  "description": "Open ClaimCenter from Portal and automate claim search + Loss Details.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "http://erieweb/*",
+    "https://erieweb/*",
+    "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/*"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://erieweb/UnderwritingPortal/Home/ViewItem*",
+        "https://erieweb/UnderwritingPortal/Home/ViewItem*"
+      ],
+      "js": ["portal.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/*"],
+      "js": ["cc.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
