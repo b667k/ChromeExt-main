@@ -1,5 +1,5 @@
-// cc.js (FULL UPDATED - frame-aware + strong reset + latest-wins + req-aware RUN_NOW + PING + visible-input-only +
-//          wait-not-loading + blur-commit + active-element latch)
+// .js (FULL UPDATED - frame-aware + strong reset + latest-wins + req-aware RUN_NOW + PING + visible-input-only +
+//          wait-not-loading + blur-commit + active-element latch + CLAIM AWARENESS)
 
 (() => {
   const DEBUG = true;
@@ -9,6 +9,8 @@
     err:  (...a) => DEBUG && console.error("[TM]", ...a),
     click: (...a) => DEBUG && console.log("[TM-CLICK]", ...a),
   };
+
+  // --- Initial Environment Checks ---
 
   function shouldProcessThisTab() {
     try {
@@ -23,31 +25,33 @@
     catch { return ""; }
   }
 
-  // We want the message listener to exist even if we decide not to run automation
-  const IS_PROCESS = shouldProcessThisTab();
+  function hasGuidewireUi() {
+    return (
+      !!document.querySelector("#TabBar-SearchTab") ||
+      !!document.querySelector("[data-gw-shortcut*='TabBar-SearchTab']") ||
+      !!document.querySelector("[id*='TabBar']") ||
+      !!document.querySelector(".gw-UiLayer")
+    );
+  }
 
-  /** timings */
+  // --- Configuration ---
+
   const WAIT_STEP_MS = 35;
   const WAIT_GW_READY_MS = 25000;
-
   const WAIT_INPUT_MS = 12000;
   const WAIT_SIMPLE_SCREEN_MS = 7000;
-
   const WAIT_ROW0_MS = 14000;
   const WAIT_LOSS_MENU_MS = 18000;
   const WAIT_LOSS_SCREEN_MS = 20000;
-
   const POST_CLICK_CHECK_MS = 1400;
   const ROW0_RETRY_COUNT = 28;
   const ROW0_RETRY_GAP_MS = 85;
-
   const RESET_TO_SIMPLE_ROUNDS = 16;
-
-  // Search submit reliability
   const SEARCH_START_WAIT_MS = 2200;
   const SEARCH_TRIES = 4;
 
-  /** selectors */
+  // --- Selectors ---
+
   const SIMPLE_CLAIM_INPUT =
     'input[name="SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchDV-ClaimNumber"]';
 
@@ -103,7 +107,6 @@
     "[id^='Claim-MenuLinks']",
   ];
 
-  // best-effort loading markers
   const GW_LOADING_MARKERS = [
     ".gw-loading",
     ".gw-mask",
@@ -114,7 +117,8 @@
     "[aria-busy='true']",
   ];
 
-  /** utils */
+  // --- Utils ---
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function isVisible(el) {
@@ -145,17 +149,6 @@
     }
     return null;
   }
-
-  function hasGuidewireUi() {
-    return (
-      !!document.querySelector("#TabBar-SearchTab") ||
-      !!document.querySelector("[data-gw-shortcut*='TabBar-SearchTab']") ||
-      !!document.querySelector("[id*='TabBar']")
-    );
-  }
-
-  // With all_frames:true, this prevents non-UI frames from running loops.
-  const IS_UI_FRAME = hasGuidewireUi();
 
   async function waitForNotLoading(timeoutMs = 9000) {
     const t0 = Date.now();
@@ -189,7 +182,6 @@
     try { el.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 })); } catch {}
     try { el.click(); } catch {}
 
-    // extra keyboard activation (GW likes this)
     try {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
       el.dispatchEvent(new KeyboardEvent("keyup",   { key: "Enter", code: "Enter", bubbles: true }));
@@ -208,21 +200,27 @@
 
     try { input.focus(); } catch {}
 
-    // user-like clear
-    try {
-      input.select?.();
-      document.execCommand?.("delete");
-    } catch {}
+    // Double clear strategy
+    const clear = () => {
+        try {
+          input.select?.();
+          document.execCommand?.("delete");
+        } catch {}
+        try {
+          if (setter) setter.call(input, "");
+          else input.value = "";
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch {}
+    };
 
-    // clear
-    try {
-      if (setter) setter.call(input, "");
-      else input.value = "";
-      input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-    } catch {}
+    clear();
+    // Blur and refocus to trigger GW validation clears
+    input.dispatchEvent(new Event("blur", { bubbles: true }));
+    try { input.blur(); } catch {}
+    try { input.focus(); } catch {}
 
-    // set
+    // Set value
     try {
       if (setter) setter.call(input, value);
       else input.value = value;
@@ -230,7 +228,7 @@
       input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
 
-      // commit
+      // Commit
       input.dispatchEvent(new Event("blur", { bubbles: true }));
       try { input.blur(); } catch {}
     } catch {}
@@ -265,13 +263,10 @@
   }
 
   async function refindSimpleClaimInput() {
-    // Require screen presence to avoid grabbing stale/hidden DV inputs
     if (!isOnSimpleSearchScreenNow()) return null;
-
     const all = Array.from(document.querySelectorAll(SIMPLE_CLAIM_INPUT));
     const vis = all.find(isVisible);
     if (vis) return vis;
-
     return await waitSel(SIMPLE_CLAIM_INPUT, WAIT_INPUT_MS, { mustBeVisible: true });
   }
 
@@ -294,15 +289,19 @@
     return false;
   }
 
-  /** state */
+  // --- State Management ---
+
   let running = false;
   let lastSeenKick = -1;
 
   async function getState() {
-    return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "kick"]);
+    // Added 'lastClaim' to tracking
+    return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
   }
-  async function setLastReq(req) {
-    await chrome.storage.local.set({ lastReq: req });
+
+  async function setSuccessState(req, claim) {
+    // Save both req AND claim so we don't block next claim if req is same
+    await chrome.storage.local.set({ lastReq: req, lastClaim: claim });
   }
 
   async function stillOwner(req) {
@@ -314,7 +313,8 @@
     return await stillOwner(req);
   }
 
-  /** latch that stops immediately if a newer req arrives */
+  // --- Actions ---
+
   async function setAndLatchClaimValue(value, {
     latchMs = 1100,
     checkEveryMs = 70,
@@ -338,9 +338,10 @@
         input.setAttribute("spellcheck", "false");
       } catch {}
 
-      // Don’t fight GW while it’s yanking focus during hydration
       try { input.focus(); } catch {}
       await sleep(15);
+      
+      // Strict active element check to ensure we are typing in the right place
       if (document.activeElement !== input) {
         await sleep(checkEveryMs);
         continue;
@@ -356,12 +357,10 @@
         await sleep(45);
         await pressEnterIn(input);
       }
-
       await sleep(checkEveryMs);
     }
 
     if (req && !(await shouldContinueForReq(req))) return false;
-
     const input = await refindSimpleClaimInput();
     return !!input && getInputValue(input) === value;
   }
@@ -384,13 +383,6 @@
     return null;
   }
 
-  /**
-   * Strong reset:
-   * - clicks Search tab twice
-   * - waits for mask to clear
-   * - clicks Claim/Search menu item
-   * - waits for Simple Search markers + input
-   */
   async function ensureOnSimpleSearch() {
     const tab = await waitForGuidewireReady();
     if (!tab) return null;
@@ -418,7 +410,6 @@
         await waitForNotLoading(9000);
         return input;
       }
-
       await sleep(220);
     }
     return null;
@@ -437,7 +428,6 @@
       if (!(await shouldContinueForReq(req))) return false;
 
       LOG.info(`Search submit attempt ${i}/${SEARCH_TRIES}`);
-
       await waitForNotLoading(9000);
 
       await setAndLatchClaimValue(claim, {
@@ -463,7 +453,6 @@
   async function openClaimFromRow0_Fast(req) {
     for (let i = 1; i <= ROW0_RETRY_COUNT; i++) {
       if (!(await shouldContinueForReq(req))) return false;
-
       const row0El = document.querySelector(ROW0);
       if (!row0El) return false;
 
@@ -472,7 +461,6 @@
 
       const opened = await waitAny(CLAIM_OPEN_MARKERS, POST_CLICK_CHECK_MS);
       if (opened) return true;
-
       await sleep(ROW0_RETRY_GAP_MS);
     }
     return false;
@@ -496,7 +484,7 @@
     return true;
   }
 
-  /** scheduler */
+  // --- Scheduler ---
   let scheduled = false;
   function schedule(ms = 0) {
     if (scheduled) return;
@@ -507,32 +495,41 @@
     }, ms);
   }
 
-  /** main loop */
+  // --- Main Loop ---
   async function runLoop() {
     if (running) return;
     running = true;
 
     try {
       while (true) {
-        const { handoff, ownerReq, lastReq, kick } = await getState();
+        // 1. Get State including lastClaim
+        const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
+
         if (!handoff?.claim || !handoff?.req) return;
         if (ownerReq !== handoff.req) return;
 
-        // latest-wins: only process a new kick or a new req
-        if (lastReq === handoff.req && kick === lastSeenKick) return;
+        // 2. Gatekeeper:
+        //    If we already processed this EXACT req AND claim, waiting for a kick.
+        //    CRITICAL FIX: If claim changed, we run, even if req is same.
+        const alreadyDone = (lastReq === handoff.req && lastClaim === handoff.claim);
+        if (alreadyDone && kick === lastSeenKick) return;
 
+        // Update local kicker
         lastSeenKick = kick;
 
         const req = handoff.req;
         const claim = handoff.claim;
 
-        LOG.info("CC run start", {
-          claim, req, kick,
-          birthReq: birthReq(),
-          onClaimScreen: isOnClaimScreen(),
-          frame: window === window.top ? "top" : "child",
-          uiFrame: IS_UI_FRAME
-        });
+        // Check environment (UI Frame) inside loop for robustness
+        if (!hasGuidewireUi()) {
+           LOG.warn("UI not ready yet...");
+           await sleep(500);
+           // If it's been a while, we might be in a non-UI frame after all? 
+           // But we continue to try in case of slow load.
+           continue; 
+        }
+
+        LOG.info("CC run start", { claim, req, kick, alreadyDone });
 
         const input = await ensureOnSimpleSearch();
         if (!input) {
@@ -541,53 +538,33 @@
           continue;
         }
 
-        if (!(await stillOwner(req))) {
-          LOG.warn("Owner changed; switching immediately");
-          schedule(0);
-          return;
-        }
-
+        if (!(await stillOwner(req))) { schedule(0); return; }
         await waitForNotLoading(9000);
 
         const latched = await setAndLatchClaimValue(claim, {
-          latchMs: 1250,
-          checkEveryMs: 70,
-          logLabel: "ClaimInput",
-          req
+          latchMs: 1250, checkEveryMs: 70, logLabel: "ClaimInput", req
         });
 
         if (!latched) {
-          LOG.warn("Could not latch claim value (or req changed); retrying soon");
+          LOG.warn("Could not latch claim value; retrying soon");
           await sleep(420);
           continue;
         }
 
-        if (!(await stillOwner(req))) {
-          LOG.warn("Owner changed after setting input; switching immediately");
-          schedule(0);
-          return;
-        }
+        if (!(await stillOwner(req))) { schedule(0); return; }
 
         const fired = await submitSearchReliable(claim, req);
         if (!fired) {
-          LOG.warn("Search did not appear to start; retrying soon");
+          LOG.warn("Search not started; retrying soon");
           await sleep(600);
           continue;
         }
 
-        // Post-submit GW can rehydrate old values; short re-latch
         await setAndLatchClaimValue(claim, {
-          latchMs: 720,
-          checkEveryMs: 85,
-          logLabel: "PostSearchClaimInput",
-          req
+          latchMs: 720, checkEveryMs: 85, logLabel: "PostSearchClaimInput", req
         });
 
-        if (!(await stillOwner(req))) {
-          LOG.warn("Owner changed after search; switching immediately");
-          schedule(0);
-          return;
-        }
+        if (!(await stillOwner(req))) { schedule(0); return; }
 
         const row0 = await waitSel(ROW0, WAIT_ROW0_MS, { mustBeVisible: true });
         if (!row0) {
@@ -603,11 +580,7 @@
           continue;
         }
 
-        if (!(await stillOwner(req))) {
-          LOG.warn("Owner changed after opening claim; switching immediately");
-          schedule(0);
-          return;
-        }
+        if (!(await stillOwner(req))) { schedule(0); return; }
 
         const clicked = await clickLossDetailsReliable(req);
         if (!clicked) {
@@ -623,7 +596,8 @@
           continue;
         }
 
-        await setLastReq(req);
+        // 3. Success: Save both REQ and CLAIM
+        await setSuccessState(req, claim);
         LOG.info("✅ SUCCESS", claim, req, "kick", kick);
         return;
       }
@@ -635,53 +609,48 @@
     }
   }
 
-  // req-aware RUN_NOW gate
+  // --- Bootstrapping ---
+
   async function shouldRunForReq(targetReq) {
     const { handoff, ownerReq } = await chrome.storage.local.get(["handoff", "ownerReq"]);
     return !!handoff?.req && handoff.req === targetReq && ownerReq === targetReq;
   }
 
-  // One listener (PING + RUN_NOW)
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Basic ping
     if (msg?.type === "PING_TM") {
       try {
         sendResponse({
-          ok: true,
-          process: IS_PROCESS,
-          ui: IS_UI_FRAME,
-          birthReq: birthReq(),
-          frame: window === window.top ? "top" : "child"
+          ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi(), birthReq: birthReq()
         });
       } catch {}
       return;
     }
 
     if (msg?.type !== "RUN_NOW") return;
-    if (!IS_PROCESS || !IS_UI_FRAME) return;
+    if (!shouldProcessThisTab()) return;
 
     if (msg.req) {
       shouldRunForReq(msg.req).then((ok) => {
-        if (!ok) {
-          LOG.warn("Ignoring stale RUN_NOW", { msgReq: msg.req });
-          return;
-        }
+        if (!ok) return;
         schedule(0);
       });
       return;
     }
-
     schedule(0);
   });
 
-  // Only the real process+UI frame should run automation
-  if (!IS_PROCESS || !IS_UI_FRAME) return;
+  // Entry point check:
+  // We check IS_PROCESS immediately, but we relax the IS_UI_FRAME check 
+  // to allow the script to load and wait for DOM in the loop if needed.
+  if (!shouldProcessThisTab()) return;
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.ownerReq || changes.kick) schedule(0);
+    if (changes.ownerReq || changes.kick || changes.handoff) schedule(0);
   });
 
-  // kick off
+  // Startup Kick
   schedule(650);
   schedule(1600);
 })();
