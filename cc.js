@@ -1,4 +1,4 @@
-// .js (FULL UPDATED - race-condition-fix + pending-queue + strong reset + latest-wins + req-aware)
+// cc.js (FULL UPDATED - STUCK-FIX + POLLING + AGGRESSIVE NAV + RACE FIX)
 
 (() => {
   const DEBUG = true;
@@ -45,7 +45,9 @@
   const POST_CLICK_CHECK_MS = 1400;
   const ROW0_RETRY_COUNT = 28;
   const ROW0_RETRY_GAP_MS = 85;
-  const RESET_TO_SIMPLE_ROUNDS = 16;
+  
+  // Increased reset rounds to handle slow transitions
+  const RESET_TO_SIMPLE_ROUNDS = 25; 
   const SEARCH_START_WAIT_MS = 2200;
   const SEARCH_TRIES = 4;
 
@@ -192,42 +194,30 @@
 
   function setInputValueNative(input, value) {
     if (!input) return;
-
-    const setter =
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set ||
-      Object.getOwnPropertyDescriptor(HTMLElement.prototype, "value")?.set;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set ||
+                   Object.getOwnPropertyDescriptor(HTMLElement.prototype, "value")?.set;
 
     try { input.focus(); } catch {}
 
-    // Double clear strategy
     const clear = () => {
-        try {
-          input.select?.();
-          document.execCommand?.("delete");
-        } catch {}
+        try { input.select?.(); document.execCommand?.("delete"); } catch {}
         try {
           if (setter) setter.call(input, "");
           else input.value = "";
           input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-          input.dispatchEvent(new Event("change", { bubbles: true }));
         } catch {}
     };
 
     clear();
-    // Blur and refocus to trigger GW validation clears
-    input.dispatchEvent(new Event("blur", { bubbles: true }));
+    input.dispatchEvent(new Event("blur", { bubbles: true })); // Trigger validation
     try { input.blur(); } catch {}
     try { input.focus(); } catch {}
 
-    // Set value
     try {
       if (setter) setter.call(input, value);
       else input.value = value;
-
       input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
-
-      // Commit
       input.dispatchEvent(new Event("blur", { bubbles: true }));
       try { input.blur(); } catch {}
     } catch {}
@@ -268,15 +258,11 @@
   function searchLooksStarted() {
     if (document.querySelector(ROW0)) return true;
     if (document.querySelector(RESULTS_LV)) return true;
-
     const outer = document.querySelector(SIMPLE_SEARCH_BTN);
     if (outer) {
-      const ariaDis = outer.getAttribute("aria-disabled");
-      if (ariaDis === "true") return true;
-      if (outer.disabled) return true;
-      if (outer.classList.contains("gw-disabled") || outer.classList.contains("gw-disabled--true")) return true;
+      if (outer.getAttribute("aria-disabled") === "true") return true;
+      if (outer.disabled || outer.classList.contains("gw-disabled")) return true;
     }
-
     for (const sel of GW_LOADING_MARKERS) {
       const el = document.querySelector(sel);
       if (el && isVisible(el)) return true;
@@ -287,8 +273,9 @@
   // --- State Management ---
 
   let running = false;
-  let hasPendingRun = false; // <--- NEW: Race condition fix
+  let hasPendingRun = false; 
   let lastSeenKick = -1;
+  let lastRunTime = 0;
 
   async function getState() {
     return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
@@ -303,61 +290,7 @@
     return s.ownerReq === req && s.handoff?.req === req;
   }
 
-  async function shouldContinueForReq(req) {
-    return await stillOwner(req);
-  }
-
-  // --- Actions ---
-
-  async function setAndLatchClaimValue(value, {
-    latchMs = 1100,
-    checkEveryMs = 70,
-    logLabel = "ClaimInput",
-    req = null,
-    quietAfterFirstFix = true
-  } = {}) {
-    const t0 = Date.now();
-    let loggedOnce = false;
-
-    while (Date.now() - t0 < latchMs) {
-      if (req && !(await shouldContinueForReq(req))) return false;
-
-      const input = await refindSimpleClaimInput();
-      if (!input) return false;
-
-      try {
-        input.setAttribute("autocomplete", "off");
-        input.setAttribute("autocorrect", "off");
-        input.setAttribute("autocapitalize", "off");
-        input.setAttribute("spellcheck", "false");
-      } catch {}
-
-      try { input.focus(); } catch {}
-      await sleep(15);
-      
-      // Strict active element check
-      if (document.activeElement !== input) {
-        await sleep(checkEveryMs);
-        continue;
-      }
-
-      const cur = getInputValue(input);
-      if (cur !== value) {
-        if (!quietAfterFirstFix || !loggedOnce) {
-          LOG.warn(`${logLabel}: value mismatch, fixing`, "cur=", cur, "want=", value);
-          loggedOnce = true;
-        }
-        setInputValueNative(input, value);
-        await sleep(45);
-        await pressEnterIn(input);
-      }
-      await sleep(checkEveryMs);
-    }
-
-    if (req && !(await shouldContinueForReq(req))) return false;
-    const input = await refindSimpleClaimInput();
-    return !!input && getInputValue(input) === value;
-  }
+  // --- Critical Navigation ---
 
   async function waitForGuidewireReady() {
     return (
@@ -377,37 +310,42 @@
     return null;
   }
 
+  // AGGRESSIVE RESET: Hammer the Search Tab until the input appears
   async function ensureOnSimpleSearch() {
-    const tab = await waitForGuidewireReady();
+    let tab = await waitForGuidewireReady();
     if (!tab) return null;
 
     for (let i = 0; i < RESET_TO_SIMPLE_ROUNDS; i++) {
-      await hardClick(tab, "SearchTab");
-      await sleep(140);
-      await waitForNotLoading(9000);
+      // 1. Check if we are already there
+      if (isOnSimpleSearchScreenNow()) {
+          const input = await refindSimpleClaimInput();
+          if (input) return input;
+      }
 
-      await hardClick(tab, "SearchTab(2)");
+      // 2. Click Search Tab
+      tab = document.querySelector(SEARCH_TAB_SEL) || document.querySelector(SEARCH_TAB_FALLBACKS[0]);
+      if (tab) {
+          await hardClick(tab, "SearchTab");
+          await sleep(150);
+          await waitForNotLoading(3000);
+      }
+
+      // 3. Occasionally try clicking the dropdown menu item directly if the tab click is stuck
+      if (i % 3 === 0) {
+        const claimItem = findClaimMenuItem();
+        if (claimItem) {
+            await hardClick(claimItem, "MenuItem:Claim");
+            await sleep(250);
+            await waitForNotLoading(5000);
+        }
+      }
+
       await sleep(200);
-      await waitForNotLoading(9000);
-
-      const claimItem = findClaimMenuItem();
-      if (claimItem) {
-        await hardClick(claimItem, "MenuItem:Claim");
-        await sleep(220);
-        await waitForNotLoading(9000);
-      }
-
-      await waitAny(SIMPLE_SEARCH_SCREEN_MARKERS, WAIT_SIMPLE_SCREEN_MS).catch(() => null);
-
-      const input = await refindSimpleClaimInput();
-      if (input) {
-        await waitForNotLoading(9000);
-        return input;
-      }
-      await sleep(220);
     }
     return null;
   }
+
+  // --- Automation Steps ---
 
   async function clickSearchOnce() {
     const outer = document.querySelector(SIMPLE_SEARCH_BTN) || await waitSel(SIMPLE_SEARCH_BTN, 2600);
@@ -417,20 +355,41 @@
     if (inner) await hardClick(inner, "SearchBtn(inner)");
   }
 
+  async function setAndLatchClaimValue(value, { latchMs = 1100, checkEveryMs = 70, req = null } = {}) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < latchMs) {
+      if (req && !(await stillOwner(req))) return false;
+      
+      const input = await refindSimpleClaimInput();
+      if (!input) return false;
+
+      try { input.focus(); } catch {}
+      await sleep(15);
+      
+      if (document.activeElement !== input) {
+        await sleep(checkEveryMs);
+        continue;
+      }
+
+      if (getInputValue(input) !== value) {
+        setInputValueNative(input, value);
+        await sleep(45);
+        await pressEnterIn(input);
+      }
+      await sleep(checkEveryMs);
+    }
+    const input = await refindSimpleClaimInput();
+    return !!input && getInputValue(input) === value;
+  }
+
   async function submitSearchReliable(claim, req) {
     for (let i = 1; i <= SEARCH_TRIES; i++) {
-      if (!(await shouldContinueForReq(req))) return false;
+      if (!(await stillOwner(req))) return false;
 
-      LOG.info(`Search submit attempt ${i}/${SEARCH_TRIES}`);
+      LOG.info(`Search submit attempt ${i}`);
       await waitForNotLoading(9000);
 
-      await setAndLatchClaimValue(claim, {
-        latchMs: 340,
-        checkEveryMs: 70,
-        logLabel: "PreSearchLatch",
-        req
-      });
-
+      await setAndLatchClaimValue(claim, { latchMs: 340, req });
       await clickSearchOnce();
 
       const input = await refindSimpleClaimInput();
@@ -446,13 +405,11 @@
 
   async function openClaimFromRow0_Fast(req) {
     for (let i = 1; i <= ROW0_RETRY_COUNT; i++) {
-      if (!(await shouldContinueForReq(req))) return false;
+      if (!(await stillOwner(req))) return false;
       const row0El = document.querySelector(ROW0);
       if (!row0El) return false;
 
-      LOG.info(`CC: Row0 click attempt ${i}/${ROW0_RETRY_COUNT}`);
       await hardClick(row0El, "Row0");
-
       const opened = await waitAny(CLAIM_OPEN_MARKERS, POST_CLICK_CHECK_MS);
       if (opened) return true;
       await sleep(ROW0_RETRY_GAP_MS);
@@ -461,13 +418,8 @@
   }
 
   async function clickLossDetailsReliable(req) {
-    if (!(await shouldContinueForReq(req))) return false;
-
-    const el = await waitAny(
-      [LOSS_DETAILS_MENUITEM_SELECTOR, LOSS_DETAILS_MENUITEM_ID_FALLBACK],
-      WAIT_LOSS_MENU_MS,
-      { mustBeVisible: true }
-    );
+    if (!(await stillOwner(req))) return false;
+    const el = await waitAny([LOSS_DETAILS_MENUITEM_SELECTOR, LOSS_DETAILS_MENUITEM_ID_FALLBACK], WAIT_LOSS_MENU_MS, { mustBeVisible: true });
     if (!el) return false;
 
     await hardClick(el, "LossDetailsMenuItem");
@@ -478,17 +430,14 @@
     return true;
   }
 
-  // --- Scheduler ---
+  // --- Scheduler & Watchdog ---
+
   let scheduled = false;
   function schedule(ms = 0) {
-    // RACE CONDITION FIX:
-    // If we are currently running, don't just ignore.
-    // Flag that we need to run AGAIN as soon as we finish.
     if (running) {
       hasPendingRun = true;
       return;
     }
-
     if (scheduled) return;
     scheduled = true;
     setTimeout(() => {
@@ -498,25 +447,30 @@
   }
 
   // --- Main Loop ---
+
   async function runLoop() {
-    // Guard: already running?
-    if (running) {
-        hasPendingRun = true;
-        return;
-    }
+    if (running) { hasPendingRun = true; return; }
     
+    // STUCK BREAKER: If last run started > 45s ago and we are still here, something is wrong.
+    // But since we just set running=true, we rely on the logic below to clear it.
     running = true;
-    hasPendingRun = false; // Reset pending flag as we start
+    lastRunTime = Date.now();
+    hasPendingRun = false;
 
     try {
       while (true) {
-        // 1. Get State
+        // Watchdog check inside loop
+        if (Date.now() - lastRunTime > 45000) {
+            LOG.warn("Watchdog: Run taking too long, aborting to reset state.");
+            return;
+        }
+
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
 
         if (!handoff?.claim || !handoff?.req) return;
         if (ownerReq !== handoff.req) return;
 
-        // 2. Gatekeeper:
+        // Logic: If (Req AND Claim) match last success -> Do nothing (wait for kick)
         const alreadyDone = (lastReq === handoff.req && lastClaim === handoff.claim);
         if (alreadyDone && kick === lastSeenKick) return;
 
@@ -530,131 +484,88 @@
            continue; 
         }
 
-        LOG.info("CC run start", { claim, req, kick });
+        LOG.info("CC STARTING", { claim, req });
 
         const input = await ensureOnSimpleSearch();
         if (!input) {
-          LOG.warn("No Simple Claim input; retrying");
+          LOG.warn("Could not find Search Input after navigation retries");
           await sleep(650);
           continue;
         }
 
-        if (!(await stillOwner(req))) { return; } // Handled by finally/pending check
+        if (!(await stillOwner(req))) return;
         await waitForNotLoading(9000);
 
-        const latched = await setAndLatchClaimValue(claim, {
-          latchMs: 1250, checkEveryMs: 70, logLabel: "ClaimInput", req
-        });
-
-        if (!latched) {
-          LOG.warn("Claim latch failed");
-          await sleep(420);
-          continue;
+        if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) {
+            LOG.warn("Latch failed"); await sleep(420); continue;
         }
 
-        if (!(await stillOwner(req))) { return; }
+        if (!(await stillOwner(req))) return;
 
-        const fired = await submitSearchReliable(claim, req);
-        if (!fired) {
-          LOG.warn("Search start failed");
-          await sleep(600);
-          continue;
+        if (!(await submitSearchReliable(claim, req))) {
+            LOG.warn("Search submit failed"); await sleep(600); continue;
         }
 
-        await setAndLatchClaimValue(claim, {
-          latchMs: 720, checkEveryMs: 85, logLabel: "PostSearchClaimInput", req
-        });
+        await setAndLatchClaimValue(claim, { latchMs: 720, req }); // Short latch post-click
 
-        if (!(await stillOwner(req))) { return; }
+        if (!(await stillOwner(req))) return;
 
         const row0 = await waitSel(ROW0, WAIT_ROW0_MS, { mustBeVisible: true });
         if (!row0) {
-          LOG.warn("Row0 not found");
-          await sleep(650);
-          continue;
+            LOG.warn("Row0 missing"); await sleep(650); continue;
         }
 
-        const opened = await openClaimFromRow0_Fast(req);
-        if (!opened) {
-          LOG.warn("Row0 click failed");
-          await sleep(650);
-          continue;
+        if (!(await openClaimFromRow0_Fast(req))) {
+            LOG.warn("Open claim failed"); await sleep(650); continue;
         }
 
-        if (!(await stillOwner(req))) { return; }
+        if (!(await stillOwner(req))) return;
 
-        const clicked = await clickLossDetailsReliable(req);
-        if (!clicked) {
-          LOG.warn("Loss Details click failed");
-          await sleep(750);
-          continue;
+        if (!(await clickLossDetailsReliable(req))) {
+            LOG.warn("Loss Details click failed"); await sleep(750); continue;
         }
 
         const ok = isOnLossDetails() || !!(await waitAny(LOSS_DETAILS_SCREENS, WAIT_LOSS_SCREEN_MS));
         if (!ok) {
-          LOG.warn("Loss Details not detected");
-          await sleep(800);
-          continue;
+            LOG.warn("Loss Details screen not reached"); await sleep(800); continue;
         }
 
-        // 3. Success
         await setSuccessState(req, claim);
-        LOG.info("✅ SUCCESS", claim, req, "kick", kick);
+        LOG.info("✅ SUCCESS", claim);
         return;
       }
     } catch (e) {
-      LOG.err("Run crashed:", e?.message || e);
-      // If we crashed, assume we need to try again later
-      schedule(900);
+      LOG.err("CRASH:", e);
+      schedule(1000);
     } finally {
       running = false;
-      // RACE CONDITION RESOLUTION:
-      // If a request came in WHILE we were running, we scheduled it via hasPendingRun.
-      // Trigger it now.
       if (hasPendingRun) {
-        LOG.info("Pending run detected, restarting loop immediately.");
-        schedule(50);
+        LOG.info("Pending run detected, restarting.");
+        schedule(100);
       }
     }
   }
 
-  // --- Bootstrapping ---
-
-  async function shouldRunForReq(targetReq) {
-    const { handoff, ownerReq } = await chrome.storage.local.get(["handoff", "ownerReq"]);
-    return !!handoff?.req && handoff.req === targetReq && ownerReq === targetReq;
-  }
+  // --- Triggers ---
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "PING_TM") {
-      try {
-        sendResponse({
-          ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi(), birthReq: birthReq()
-        });
-      } catch {}
+      sendResponse({ ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi() });
       return;
     }
-
-    if (msg?.type !== "RUN_NOW") return;
-    if (!shouldProcessThisTab()) return;
-
-    if (msg.req) {
-      shouldRunForReq(msg.req).then((ok) => {
-        if (!ok) return;
-        schedule(0);
-      });
-      return;
+    if (msg?.type === "RUN_NOW" && shouldProcessThisTab()) {
+      schedule(0);
     }
-    schedule(0);
   });
 
   if (!shouldProcessThisTab()) return;
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    if (changes.ownerReq || changes.kick || changes.handoff) schedule(0);
+    if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
   });
 
-  schedule(650);
-  schedule(1600);
+  // POLLING: Force check every 1s to catch missed triggers
+  setInterval(() => schedule(0), 1000);
+
+  schedule(500);
 })();
