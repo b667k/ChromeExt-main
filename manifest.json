@@ -4,7 +4,25 @@
   "author": "Blaine Oler",
   "version": "1.0.5",
   "description": "Open ClaimCenter from Portal and automate claim search + Loss Details.",
-  "permissions": ["storage", "tabs"],
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_popup": "popup.html"
+  },
+
+"permissions": ["storage", "tabs", "nativeMessaging"],
   "host_permissions": [
     "http://erieweb/*",
     "https://erieweb/*",

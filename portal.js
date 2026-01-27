@@ -1,6 +1,6 @@
-// portal.js (FULL UPDATED - Persistent Observer + fire-and-forget)
+// portal.js (UPDATED - create container if missing)
 (() => {
-  const DEBUG = true;
+  const DEBUG = false;
   const log = (...a) => DEBUG && console.log("[P2CC]", ...a);
 
   function getClaimNumberFromTaskDescription() {
@@ -14,18 +14,47 @@
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function ensureContainer() {
+    // 1) Use existing container if present
+    let c = document.querySelector("#tm-custom-mainframe-buttons");
+    if (c) return c;
+
+    // 2) Otherwise, create our own container
+    c = document.createElement("div");
+    c.id = "tm-custom-mainframe-buttons";
+
+    // Styling: keep it subtle and non-breaking
+    c.style.display = "inline-flex";
+    c.style.alignItems = "center";
+    c.style.gap = "6px";
+    c.style.marginLeft = "6px";
+
+    // 3) Prefer inserting near taskDescription
+    const td = document.querySelector("#taskDescription");
+    if (td) {
+      // Put it right after taskDescription (or inside its parent)
+      const parent = td.parentElement || td;
+      parent.appendChild(c);
+      log("created container near #taskDescription");
+      return c;
+    }
+
+    // 4) Fallback: put it at top of body
+    (document.body || document.documentElement).prepend(c);
+    log("created container in body");
+    return c;
+  }
+
   function addButton(container) {
-    // 1. Safety check: if container missing or button already exists, stop.
     if (!container || container.querySelector("#p2ccBtn")) return;
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.id = "p2ccBtn";
-    btn.textContent = "Search ECC (Extension)";
+    btn.textContent = "Search ECC";
     btn.className = "btn btn-primary-variant btn-mainframe";
     btn.style.marginLeft = "6px";
 
-    // tiny cooldown to prevent accidental double clicks
     let cooldown = false;
 
     btn.addEventListener(
@@ -46,7 +75,6 @@
 
         const req = uniqueReq();
 
-        // IMPORTANT: fire-and-forget. Do not await.
         chrome.storage.local.get(["kick"], (res) => {
           const oldKick = Number(res?.kick || 0);
           const kick = oldKick + 1;
@@ -54,28 +82,24 @@
           const payload = {
             handoff: { claim, req, ts: Date.now() },
             ownerReq: req,
-            kick
+            kick,
           };
 
           chrome.storage.local.set(payload, () => {
             const err = chrome.runtime.lastError;
             if (err) {
-              console.warn("[P2CC] storage.set warning", err?.message || err);
+              // optional: keep warnings off unless DEBUG
+              log("storage.set warning", err?.message || err);
             } else {
               log("handoff set", { claim, req, kick });
             }
 
-            // Also fire-and-forget message to SW.
             try {
-              chrome.runtime.sendMessage({ type: "OPEN_CC", req }, (resp) => {
-                const msgErr = chrome.runtime.lastError;
-                if (msgErr) {
-                  // Suppress irrelevant context invalidation errors
-                  return;
-                }
+              chrome.runtime.sendMessage({ type: "OPEN_CC", req }, () => {
+                // ignore context invalidation etc.
               });
-            } catch (e2) {
-              // Ignore immediate context errors
+            } catch {
+              // ignore
             }
           });
         });
@@ -87,22 +111,20 @@
     log("button added");
   }
 
-  // --- OBSERVER LOGIC ---
-
   function tryAdd() {
-    const c = document.querySelector("#tm-custom-mainframe-buttons");
-    if (c) addButton(c);
+    const c = ensureContainer();
+    addButton(c);
   }
 
-  // 1. Try immediately
+  // Try immediately
   tryAdd();
 
-  // 2. Watch for changes (if the user switches tasks or the page is slow)
+  // Watch for changes (task switches / slow renders)
   const observer = new MutationObserver(() => {
     tryAdd();
   });
 
-  observer.observe(document.body, {
+  observer.observe(document.documentElement, {
     childList: true,
     subtree: true,
   });

@@ -1,4 +1,5 @@
-// sw.js (HARDENED - initial complete check + process-tab targeting + ping-then-run + latest-wins)
+// sw.js (HARDENED - initial complete check + process-tab targeting + ping-then-run + latest-wins
+//        + FEEDBACK OUTBOX + optional Native Messaging flush)
 
 const CC_ORIGIN = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net";
 const CC_URL_BASE = `${CC_ORIGIN}/ClaimCenter.do`;
@@ -7,6 +8,9 @@ const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[SW]", ...a);
 const warn = (...a) => console.warn("[SW]", ...a);
 
+// -----------------------
+// CLAIMCENTER AUTOMATION
+// -----------------------
 function buildCcUrl(req) {
   const u = new URL(CC_URL_BASE);
   u.searchParams.set("tm_t", String(req));
@@ -30,10 +34,7 @@ async function findExistingProcessTab() {
   const proc = tabs.find((t) => t.url && isProcessUrl(t.url));
   if (proc) return proc;
 
-  // If none, you can either:
-  // (A) create a new tab (safer), OR
-  // (B) reuse the first ClaimCenter tab (your original behavior).
-  // I recommend (A). So return null here.
+  // If none, create a new process tab (safer)
   return null;
 }
 
@@ -55,7 +56,9 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
     const finish = (ok) => {
       if (done) return;
       done = true;
-      try { chrome.tabs.onUpdated.removeListener(onUpd); } catch {}
+      try {
+        chrome.tabs.onUpdated.removeListener(onUpd);
+      } catch {}
       resolve(ok);
     };
 
@@ -115,54 +118,170 @@ async function pingThenRun(tabId, req, attempts = 12) {
   return { delivered: false, reason: "no_receiver_after_retries" };
 }
 
+// -----------------------
+// FEEDBACK OUTBOX
+// -----------------------
+const OUTBOX_KEY = "feedback_outbox_v1";
+
+// Change this to your native host name once installed.
+// If native messaging isn't installed, flush calls will fail and we just keep queueing.
+const NATIVE_HOST_NAME = "com.erie.feedback";
+
+async function getOutbox() {
+  const data = await chrome.storage.local.get(OUTBOX_KEY);
+  return Array.isArray(data[OUTBOX_KEY]) ? data[OUTBOX_KEY] : [];
+}
+
+async function setOutbox(items) {
+  await chrome.storage.local.set({ [OUTBOX_KEY]: items });
+}
+
+async function enqueueFeedback(entry) {
+  const outbox = await getOutbox();
+  outbox.push(entry);
+  await setOutbox(outbox);
+  return outbox.length;
+}
+
+async function flushOutboxToNative() {
+  const outbox = await getOutbox();
+  if (outbox.length === 0) return { sent: 0, remaining: 0 };
+
+  await flushFeedbackToNativeHost(outbox);
+
+  // Clear only after success
+  await setOutbox([]);
+  return { sent: outbox.length, remaining: 0 };
+}
+
+async function flushFeedbackToNativeHost(items) {
+  const payload = { kind: "feedback_batch", items };
+
+  const response = await new Promise((resolve, reject) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, payload, (resp) => {
+      const err = chrome.runtime.lastError;
+      if (err) return reject(new Error(err.message));
+      resolve(resp);
+    });
+  });
+
+  if (!response || response.ok !== true) {
+    throw new Error(response?.error || "Native host returned failure");
+  }
+
+  return response;
+}
+
+
+// Optional: periodically attempt flush (best-effort). Requires "alarms" permission if you enable this.
+async function tryBackgroundFlushBestEffort() {
+  try {
+    const res = await flushOutboxToNative();
+    if (res.sent > 0) log("background flush sent", res.sent);
+  } catch (e) {
+    // expected if offline or native host not installed
+    if (DEBUG) warn("background flush failed (will retry later)", String(e?.message || e));
+  }
+}
+
+// -----------------------
+// SINGLE onMessage LISTENER (handles both OPEN_CC + feedback)
+// -----------------------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
-    if (msg?.type !== "OPEN_CC") return;
+    // ---- ClaimCenter automation ----
+    if (msg?.type === "OPEN_CC") {
+      const req = msg.req;
+      const url = buildCcUrl(req);
 
-    const req = msg.req;
-    const url = buildCcUrl(req);
+      // Optionally re-assert ownerReq to reduce race windows
+      try {
+        await chrome.storage.local.set({ ownerReq: req });
+      } catch {}
 
-    // Optionally re-assert ownerReq to reduce race windows
-    // (Portal sets it, but this helps if portal storage.set hiccups)
-    try { await chrome.storage.local.set({ ownerReq: req }); } catch {}
+      let tab = await findExistingProcessTab();
 
-    let tab = await findExistingProcessTab();
+      if (!tab) {
+        tab = await chrome.tabs.create({ url, active: true });
+        log("created process CC tab", tab.id);
+      } else {
+        await chrome.tabs.update(tab.id, { url, active: true });
+        log("updated process CC tab", tab.id);
+      }
 
-    if (!tab) {
-      tab = await chrome.tabs.create({ url, active: true });
-      log("created process CC tab", tab.id);
-    } else {
-      await chrome.tabs.update(tab.id, { url, active: true });
-      log("updated process CC tab", tab.id);
-    }
+      // Wait for navigation to finish so cc.js (document_idle) can run
+      const completed = await waitForTabComplete(tab.id, 25000);
+      log("tab complete?", completed, tab.id);
 
-    // Wait for navigation to finish so cc.js (document_idle) can run
-    const completed = await waitForTabComplete(tab.id, 25000);
-    log("tab complete?", completed, tab.id);
+      // Latest-wins: don’t run stale req
+      if (!(await stillLatestReq(req))) {
+        log("Skipping stale req (newer request exists)", { req });
+        sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+        return;
+      }
 
-    // Latest-wins: don’t run stale req
-    if (!(await stillLatestReq(req))) {
-      log("Skipping stale req (newer request exists)", { req });
-      sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+      // Deliver: ping until receiver exists, then RUN_NOW(req)
+      const result = await pingThenRun(tab.id, req, 12);
+
+      // Re-check latest-wins after delivery attempts
+      if (!(await stillLatestReq(req))) {
+        log("Delivery finished but req no longer latest", { req });
+        sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+        return;
+      }
+
+      log("RUN_NOW delivered?", result.delivered, result.reason, tab.id);
+      sendResponse({
+        ok: true,
+        tabId: tab.id,
+        completed,
+        delivered: result.delivered,
+        reason: result.reason,
+      });
       return;
     }
 
-    // Deliver: ping until receiver exists, then RUN_NOW(req)
-    const result = await pingThenRun(tab.id, req, 12);
+    // ---- Feedback: popup queues one item ----
+    if (msg?.type === "FEEDBACK_QUEUED") {
+      const entry = msg.payload;
+      const count = await enqueueFeedback(entry);
 
-    // Re-check latest-wins after delivery attempts
-    if (!(await stillLatestReq(req))) {
-      log("Delivery finished but req no longer latest", { req });
-      sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+      // Best-effort immediate flush attempt
+      try {
+        await flushFeedbackToNativeHost([entry]);
+        // If flush succeeded, also remove it from outbox (since it’s now sent to file)
+        const outbox = await getOutbox();
+        const remaining = outbox.filter((x) => x?.id !== entry?.id);
+        await setOutbox(remaining);
+
+        sendResponse({ ok: true, queued: count, flushed: true });
+      } catch (e) {
+        // Keep in outbox for retry
+        sendResponse({ ok: true, queued: count, flushed: false, error: String(e?.message || e) });
+      }
       return;
     }
 
-    log("RUN_NOW delivered?", result.delivered, result.reason, tab.id);
-    sendResponse({ ok: true, tabId: tab.id, completed, delivered: result.delivered, reason: result.reason });
+    // ---- Feedback: force flush everything queued ----
+    if (msg?.type === "FEEDBACK_FLUSH_OUTBOX") {
+      try {
+        const res = await flushOutboxToNative();
+        sendResponse({ ok: true, ...res });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+      return;
+    }
+
+    // default
+    sendResponse({ ok: false, error: "Unhandled message type" });
   })().catch((e) => {
-    console.error("[SW] OPEN_CC failed", e);
+    console.error("[SW] onMessage handler failed", e);
     sendResponse({ ok: false, error: String(e?.message || e) });
   });
 
   return true;
 });
+
+// Optional: attempt a best-effort flush on extension startup (won’t hurt if it fails)
+tryBackgroundFlushBestEffort();

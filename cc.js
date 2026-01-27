@@ -1,13 +1,15 @@
 // cc.js (FULL UPDATED - STUCK-FIX + POLLING + AGGRESSIVE NAV + RACE FIX)
 
 (() => {
-  const DEBUG = true;
-  const LOG = {
-    info: (...a) => DEBUG && console.log("[TM]", ...a),
-    warn: (...a) => console.warn("[TM]", ...a),
-    err:  (...a) => DEBUG && console.error("[TM]", ...a),
-    click: (...a) => DEBUG && console.log("[TM-CLICK]", ...a),
-  };
+  const DEBUG = false;
+const LOG = DEBUG
+  ? {
+      info:  (...a) => console.log("[TM]", ...a),
+      warn:  (...a) => console.warn("[TM]", ...a),
+      err:   (...a) => console.error("[TM]", ...a),
+      click: (...a) => console.log("[TM-CLICK]", ...a),
+    }
+  : { info(){}, warn(){}, err(){}, click(){} };
 
   // --- Initial Environment Checks ---
 
