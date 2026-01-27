@@ -1,4 +1,5 @@
 // sw.js (HARDENED - initial complete check + process-tab targeting + ping-then-run + latest-wins
+//        + RUN MODE short-circuit for copy_only
 //        + FEEDBACK OUTBOX + optional Native Messaging flush)
 
 const CC_ORIGIN = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net";
@@ -7,6 +8,21 @@ const CC_URL_BASE = `${CC_ORIGIN}/ClaimCenter.do`;
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[SW]", ...a);
 const warn = (...a) => console.warn("[SW]", ...a);
+
+// -----------------------
+// SETTINGS (sync)
+// -----------------------
+const SETTINGS_KEY = "settings_v1";
+const DEFAULT_SETTINGS = { runMode: "full" }; // full | claim_only | copy_only
+
+async function getRunMode() {
+  try {
+    const data = await chrome.storage.sync.get(SETTINGS_KEY);
+    return data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
+  } catch {
+    return DEFAULT_SETTINGS.runMode;
+  }
+}
 
 // -----------------------
 // CLAIMCENTER AUTOMATION
@@ -172,7 +188,6 @@ async function flushFeedbackToNativeHost(items) {
   return response;
 }
 
-
 // Optional: periodically attempt flush (best-effort). Requires "alarms" permission if you enable this.
 async function tryBackgroundFlushBestEffort() {
   try {
@@ -191,6 +206,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     // ---- ClaimCenter automation ----
     if (msg?.type === "OPEN_CC") {
+      // ✅ If user selected copy_only, we do NOT open ClaimCenter.
+      // Copy happens in popup.js in a user-gesture context.
+      const runMode = await getRunMode();
+      if (runMode === "copy_only") {
+        sendResponse({ ok: true, skipped: true, reason: "copy_only_popup_copies" });
+        return;
+      }
+
       const req = msg.req;
       const url = buildCcUrl(req);
 

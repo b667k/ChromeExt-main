@@ -1,18 +1,44 @@
-// cc.js (FULL UPDATED - STUCK-FIX + POLLING + AGGRESSIVE NAV + RACE FIX)
+// cc.js (FULL UPDATED - STUCK-FIX + POLLING + AGGRESSIVE NAV + RACE FIX
+//        + RUN MODE SETTINGS: full | claim_only | copy_only)
 
 (() => {
   const DEBUG = false;
-const LOG = DEBUG
-  ? {
-      info:  (...a) => console.log("[TM]", ...a),
-      warn:  (...a) => console.warn("[TM]", ...a),
-      err:   (...a) => console.error("[TM]", ...a),
-      click: (...a) => console.log("[TM-CLICK]", ...a),
+  const LOG = DEBUG
+    ? {
+        info: (...a) => console.log("[TM]", ...a),
+        warn: (...a) => console.warn("[TM]", ...a),
+        err: (...a) => console.error("[TM]", ...a),
+        click: (...a) => console.log("[TM-CLICK]", ...a),
+      }
+    : { info() {}, warn() {}, err() {}, click() {} };
+
+  // --- Settings ---
+  const SETTINGS_KEY = "settings_v1";
+  const DEFAULT_SETTINGS = { runMode: "full" }; // full | claim_only | copy_only
+  let cachedRunMode = DEFAULT_SETTINGS.runMode;
+
+  async function loadRunMode() {
+    try {
+      const data = await chrome.storage.sync.get(SETTINGS_KEY);
+      const mode = data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
+      cachedRunMode = mode;
+      return mode;
+    } catch {
+      cachedRunMode = DEFAULT_SETTINGS.runMode;
+      return cachedRunMode;
     }
-  : { info(){}, warn(){}, err(){}, click(){} };
+  }
+
+  // Keep cache fresh if user changes settings while CC tab is open
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "sync") return;
+    if (changes[SETTINGS_KEY]) {
+      const next = changes[SETTINGS_KEY]?.newValue?.runMode;
+      if (next) cachedRunMode = next;
+    }
+  });
 
   // --- Initial Environment Checks ---
-
   function shouldProcessThisTab() {
     try {
       return new URLSearchParams(location.search || "").get("process") === "true";
@@ -22,8 +48,11 @@ const LOG = DEBUG
   }
 
   function birthReq() {
-    try { return new URLSearchParams(location.search || "").get("tm_t") || ""; }
-    catch { return ""; }
+    try {
+      return new URLSearchParams(location.search || "").get("tm_t") || "";
+    } catch {
+      return "";
+    }
   }
 
   function hasGuidewireUi() {
@@ -36,25 +65,21 @@ const LOG = DEBUG
   }
 
   // --- Configuration ---
-
   const WAIT_STEP_MS = 35;
   const WAIT_GW_READY_MS = 25000;
   const WAIT_INPUT_MS = 12000;
-  const WAIT_SIMPLE_SCREEN_MS = 7000;
   const WAIT_ROW0_MS = 14000;
   const WAIT_LOSS_MENU_MS = 18000;
   const WAIT_LOSS_SCREEN_MS = 20000;
   const POST_CLICK_CHECK_MS = 1400;
   const ROW0_RETRY_COUNT = 28;
   const ROW0_RETRY_GAP_MS = 85;
-  
-  // Increased reset rounds to handle slow transitions
-  const RESET_TO_SIMPLE_ROUNDS = 25; 
+
+  const RESET_TO_SIMPLE_ROUNDS = 25;
   const SEARCH_START_WAIT_MS = 2200;
   const SEARCH_TRIES = 4;
 
   // --- Selectors ---
-
   const SIMPLE_CLAIM_INPUT =
     'input[name="SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchDV-ClaimNumber"]';
 
@@ -103,13 +128,6 @@ const LOG = DEBUG
     "[id*='ClaimScreen']",
   ];
 
-  const CLAIM_SCREEN_MARKERS = [
-    "#Claim-ClaimScreen",
-    "[id*='ClaimScreen']",
-    "#Claim-MenuLinks",
-    "[id^='Claim-MenuLinks']",
-  ];
-
   const GW_LOADING_MARKERS = [
     ".gw-loading",
     ".gw-mask",
@@ -121,7 +139,6 @@ const LOG = DEBUG
   ];
 
   // --- Utils ---
-
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function isVisible(el) {
@@ -167,6 +184,39 @@ const LOG = DEBUG
     return false;
   }
 
+  async function copyTextToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+
+  // Try modern clipboard API first
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  // Fallback: hidden textarea + execCommand
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = value;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch {
+    return false;
+  }
+}
+
+
   async function hardClick(el, label = "") {
     if (!el) return false;
     try { el.scrollIntoView({ behavior: "auto", block: "center" }); } catch {}
@@ -202,16 +252,16 @@ const LOG = DEBUG
     try { input.focus(); } catch {}
 
     const clear = () => {
-        try { input.select?.(); document.execCommand?.("delete"); } catch {}
-        try {
-          if (setter) setter.call(input, "");
-          else input.value = "";
-          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-        } catch {}
+      try { input.select?.(); document.execCommand?.("delete"); } catch {}
+      try {
+        if (setter) setter.call(input, "");
+        else input.value = "";
+        input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+      } catch {}
     };
 
     clear();
-    input.dispatchEvent(new Event("blur", { bubbles: true })); // Trigger validation
+    input.dispatchEvent(new Event("blur", { bubbles: true }));
     try { input.blur(); } catch {}
     try { input.focus(); } catch {}
 
@@ -273,9 +323,8 @@ const LOG = DEBUG
   }
 
   // --- State Management ---
-
   let running = false;
-  let hasPendingRun = false; 
+  let hasPendingRun = false;
   let lastSeenKick = -1;
   let lastRunTime = 0;
 
@@ -293,7 +342,6 @@ const LOG = DEBUG
   }
 
   // --- Critical Navigation ---
-
   async function waitForGuidewireReady() {
     return (
       document.querySelector(SEARCH_TAB_SEL) ||
@@ -312,33 +360,29 @@ const LOG = DEBUG
     return null;
   }
 
-  // AGGRESSIVE RESET: Hammer the Search Tab until the input appears
   async function ensureOnSimpleSearch() {
     let tab = await waitForGuidewireReady();
     if (!tab) return null;
 
     for (let i = 0; i < RESET_TO_SIMPLE_ROUNDS; i++) {
-      // 1. Check if we are already there
       if (isOnSimpleSearchScreenNow()) {
-          const input = await refindSimpleClaimInput();
-          if (input) return input;
+        const input = await refindSimpleClaimInput();
+        if (input) return input;
       }
 
-      // 2. Click Search Tab
       tab = document.querySelector(SEARCH_TAB_SEL) || document.querySelector(SEARCH_TAB_FALLBACKS[0]);
       if (tab) {
-          await hardClick(tab, "SearchTab");
-          await sleep(150);
-          await waitForNotLoading(3000);
+        await hardClick(tab, "SearchTab");
+        await sleep(150);
+        await waitForNotLoading(3000);
       }
 
-      // 3. Occasionally try clicking the dropdown menu item directly if the tab click is stuck
       if (i % 3 === 0) {
         const claimItem = findClaimMenuItem();
         if (claimItem) {
-            await hardClick(claimItem, "MenuItem:Claim");
-            await sleep(250);
-            await waitForNotLoading(5000);
+          await hardClick(claimItem, "MenuItem:Claim");
+          await sleep(250);
+          await waitForNotLoading(5000);
         }
       }
 
@@ -348,7 +392,6 @@ const LOG = DEBUG
   }
 
   // --- Automation Steps ---
-
   async function clickSearchOnce() {
     const outer = document.querySelector(SIMPLE_SEARCH_BTN) || await waitSel(SIMPLE_SEARCH_BTN, 2600);
     if (outer) await hardClick(outer, "SearchBtn(outer)");
@@ -361,13 +404,13 @@ const LOG = DEBUG
     const t0 = Date.now();
     while (Date.now() - t0 < latchMs) {
       if (req && !(await stillOwner(req))) return false;
-      
+
       const input = await refindSimpleClaimInput();
       if (!input) return false;
 
       try { input.focus(); } catch {}
       await sleep(15);
-      
+
       if (document.activeElement !== input) {
         await sleep(checkEveryMs);
         continue;
@@ -388,7 +431,6 @@ const LOG = DEBUG
     for (let i = 1; i <= SEARCH_TRIES; i++) {
       if (!(await stillOwner(req))) return false;
 
-      LOG.info(`Search submit attempt ${i}`);
       await waitForNotLoading(9000);
 
       await setAndLatchClaimValue(claim, { latchMs: 340, req });
@@ -433,46 +475,33 @@ const LOG = DEBUG
   }
 
   // --- Scheduler & Watchdog ---
-
   let scheduled = false;
   function schedule(ms = 0) {
-    if (running) {
-      hasPendingRun = true;
-      return;
-    }
+    if (running) { hasPendingRun = true; return; }
     if (scheduled) return;
     scheduled = true;
-    setTimeout(() => {
-      scheduled = false;
-      runLoop();
-    }, ms);
+    setTimeout(() => { scheduled = false; runLoop(); }, ms);
   }
 
   // --- Main Loop ---
-
   async function runLoop() {
     if (running) { hasPendingRun = true; return; }
-    
-    // STUCK BREAKER: If last run started > 45s ago and we are still here, something is wrong.
-    // But since we just set running=true, we rely on the logic below to clear it.
+
     running = true;
     lastRunTime = Date.now();
     hasPendingRun = false;
 
     try {
       while (true) {
-        // Watchdog check inside loop
         if (Date.now() - lastRunTime > 45000) {
-            LOG.warn("Watchdog: Run taking too long, aborting to reset state.");
-            return;
+          LOG.warn("Watchdog: Run taking too long, aborting to reset state.");
+          return;
         }
 
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
-
         if (!handoff?.claim || !handoff?.req) return;
         if (ownerReq !== handoff.req) return;
 
-        // Logic: If (Req AND Claim) match last success -> Do nothing (wait for kick)
         const alreadyDone = (lastReq === handoff.req && lastClaim === handoff.claim);
         if (alreadyDone && kick === lastSeenKick) return;
 
@@ -480,60 +509,67 @@ const LOG = DEBUG
         const req = handoff.req;
         const claim = handoff.claim;
 
+        // Load runMode each run (cached + cheap). Default: full
+        const runMode = await loadRunMode(); // full | claim_only | copy_only
+        LOG.info("RunMode:", runMode);
+
+        // copy_only: stop early (we'll implement actual clipboard copy later)
+      // copy_only: copy claim number to clipboard, then stop (no navigation)
+if (runMode === "copy_only") {
+  const copied = await copyTextToClipboard(claim);
+
+  // Mark success so we don't re-run spammy, even if copy failed
+  await setSuccessState(req, claim);
+
+  if (copied) {
+    LOG.info("✅ SUCCESS (copy_only copied)", claim);
+  } else {
+    LOG.warn("Copy failed (clipboard blocked). Claim still stored in handoff.", claim);
+  }
+  return;
+}
+
+
         if (!hasGuidewireUi()) {
-           LOG.warn("UI not ready, waiting...");
-           await sleep(500);
-           continue; 
-        }
-
-        LOG.info("CC STARTING", { claim, req });
-
-        const input = await ensureOnSimpleSearch();
-        if (!input) {
-          LOG.warn("Could not find Search Input after navigation retries");
-          await sleep(650);
+          await sleep(500);
           continue;
         }
+
+        const input = await ensureOnSimpleSearch();
+        if (!input) { await sleep(650); continue; }
 
         if (!(await stillOwner(req))) return;
         await waitForNotLoading(9000);
 
-        if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) {
-            LOG.warn("Latch failed"); await sleep(420); continue;
-        }
-
+        if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) { await sleep(420); continue; }
         if (!(await stillOwner(req))) return;
 
-        if (!(await submitSearchReliable(claim, req))) {
-            LOG.warn("Search submit failed"); await sleep(600); continue;
-        }
+        if (!(await submitSearchReliable(claim, req))) { await sleep(600); continue; }
 
-        await setAndLatchClaimValue(claim, { latchMs: 720, req }); // Short latch post-click
-
+        await setAndLatchClaimValue(claim, { latchMs: 720, req });
         if (!(await stillOwner(req))) return;
 
         const row0 = await waitSel(ROW0, WAIT_ROW0_MS, { mustBeVisible: true });
-        if (!row0) {
-            LOG.warn("Row0 missing"); await sleep(650); continue;
+        if (!row0) { await sleep(650); continue; }
+
+        // claim_only: stop after results row is present (search completed)
+        if (runMode === "claim_only") {
+          await setSuccessState(req, claim);
+          LOG.info("✅ SUCCESS (claim_only)", claim);
+          return;
         }
 
-        if (!(await openClaimFromRow0_Fast(req))) {
-            LOG.warn("Open claim failed"); await sleep(650); continue;
-        }
-
+        // full: continue existing behavior
+        if (!(await openClaimFromRow0_Fast(req))) { await sleep(650); continue; }
         if (!(await stillOwner(req))) return;
 
-        if (!(await clickLossDetailsReliable(req))) {
-            LOG.warn("Loss Details click failed"); await sleep(750); continue;
-        }
+        if (!(await clickLossDetailsReliable(req))) { await sleep(750); continue; }
 
         const ok = isOnLossDetails() || !!(await waitAny(LOSS_DETAILS_SCREENS, WAIT_LOSS_SCREEN_MS));
-        if (!ok) {
-            LOG.warn("Loss Details screen not reached"); await sleep(800); continue;
-        }
+        if (!ok) { await sleep(800); continue; }
 
         await setSuccessState(req, claim);
-        LOG.info("✅ SUCCESS", claim);
+        LOG.info("✅ SUCCESS (full)", claim);
         return;
       }
     } catch (e) {
@@ -541,15 +577,11 @@ const LOG = DEBUG
       schedule(1000);
     } finally {
       running = false;
-      if (hasPendingRun) {
-        LOG.info("Pending run detected, restarting.");
-        schedule(100);
-      }
+      if (hasPendingRun) schedule(100);
     }
   }
 
   // --- Triggers ---
-
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "PING_TM") {
       sendResponse({ ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi() });
@@ -566,8 +598,8 @@ const LOG = DEBUG
     if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
   });
 
-  // POLLING: Force check every 1s to catch missed triggers
   setInterval(() => schedule(0), 1000);
 
-  schedule(500);
+  // init settings cache once
+  loadRunMode().finally(() => schedule(500));
 })();
