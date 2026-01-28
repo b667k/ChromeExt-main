@@ -227,7 +227,7 @@ async function openFeedbackEmailDraft() {
 
     const dataBlock = [];
     if (includeData) {
-      if (info.policy) dataBlock.push(`Policy: ${info.policy}`);
+      if (info.claim) dataBlock.push(`Claim: ${info.claim}`);
     }
 
     const body = [
