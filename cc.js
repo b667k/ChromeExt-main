@@ -5,12 +5,12 @@
   const DEBUG = false;
   const LOG = DEBUG
     ? {
-        info: (...a) => console.log("[TM]", ...a),
-        warn: (...a) => console.warn("[TM]", ...a),
-        err: (...a) => console.error("[TM]", ...a),
-        click: (...a) => console.log("[TM-CLICK]", ...a),
-      }
-    : { info() {}, warn() {}, err() {}, click() {} };
+      info: (...a) => console.log("[TM]", ...a),
+      warn: (...a) => console.warn("[TM]", ...a),
+      err: (...a) => console.error("[TM]", ...a),
+      click: (...a) => console.log("[TM-CLICK]", ...a),
+    }
+    : { info() { }, warn() { }, err() { }, click() { } };
 
   // --- Settings ---
   const SETTINGS_KEY = "settings_v1";
@@ -185,42 +185,42 @@
   }
 
   async function copyTextToClipboard(text) {
-  const value = String(text || "").trim();
-  if (!value) return false;
+    const value = String(text || "").trim();
+    if (!value) return false;
 
-  // Try modern clipboard API first
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      return true;
+    // Try modern clipboard API first
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch { }
+
+    // Fallback: hidden textarea + execCommand
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch {
+      return false;
     }
-  } catch {}
-
-  // Fallback: hidden textarea + execCommand
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = value;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.left = "-9999px";
-    ta.style.top = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, ta.value.length);
-
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return !!ok;
-  } catch {
-    return false;
   }
-}
 
 
   async function hardClick(el, label = "") {
     if (!el) return false;
-    try { el.scrollIntoView({ behavior: "auto", block: "center" }); } catch {}
-    try { el.focus(); } catch {}
+    try { el.scrollIntoView({ behavior: "auto", block: "center" }); } catch { }
+    try { el.focus(); } catch { }
 
     const rect = el.getBoundingClientRect();
     const cx = Math.floor(rect.left + rect.width / 2);
@@ -228,17 +228,17 @@
     LOG.click("hardClick", label, { cx, cy });
 
     const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: 0, buttons: 1 };
-    try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch {}
-    try { el.dispatchEvent(new MouseEvent("mousedown", opts)); } catch {}
-    try { el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 })); } catch {}
-    try { el.dispatchEvent(new MouseEvent("mouseup", { ...opts, buttons: 0 })); } catch {}
-    try { el.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 })); } catch {}
-    try { el.click(); } catch {}
+    try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch { }
+    try { el.dispatchEvent(new MouseEvent("mousedown", opts)); } catch { }
+    try { el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 })); } catch { }
+    try { el.dispatchEvent(new MouseEvent("mouseup", { ...opts, buttons: 0 })); } catch { }
+    try { el.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 })); } catch { }
+    try { el.click(); } catch { }
 
     try {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
-      el.dispatchEvent(new KeyboardEvent("keyup",   { key: "Enter", code: "Enter", bubbles: true }));
-    } catch {}
+      el.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+    } catch { }
 
     await sleep(35);
     return true;
@@ -247,23 +247,23 @@
   function setInputValueNative(input, value) {
     if (!input) return;
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set ||
-                   Object.getOwnPropertyDescriptor(HTMLElement.prototype, "value")?.set;
+      Object.getOwnPropertyDescriptor(HTMLElement.prototype, "value")?.set;
 
-    try { input.focus(); } catch {}
+    try { input.focus(); } catch { }
 
     const clear = () => {
-      try { input.select?.(); document.execCommand?.("delete"); } catch {}
+      try { input.select?.(); document.execCommand?.("delete"); } catch { }
       try {
         if (setter) setter.call(input, "");
         else input.value = "";
         input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-      } catch {}
+      } catch { }
     };
 
     clear();
     input.dispatchEvent(new Event("blur", { bubbles: true }));
-    try { input.blur(); } catch {}
-    try { input.focus(); } catch {}
+    try { input.blur(); } catch { }
+    try { input.focus(); } catch { }
 
     try {
       if (setter) setter.call(input, value);
@@ -271,8 +271,8 @@
       input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
       input.dispatchEvent(new Event("blur", { bubbles: true }));
-      try { input.blur(); } catch {}
-    } catch {}
+      try { input.blur(); } catch { }
+    } catch { }
   }
 
   function getInputValue(input) {
@@ -281,11 +281,11 @@
 
   async function pressEnterIn(el) {
     if (!el) return;
-    try { el.focus(); } catch {}
+    try { el.focus(); } catch { }
     try {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
-      el.dispatchEvent(new KeyboardEvent("keyup",   { key: "Enter", code: "Enter", bubbles: true }));
-    } catch {}
+      el.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
+    } catch { }
   }
 
   function isOnLossDetails() {
@@ -408,7 +408,7 @@
       const input = await refindSimpleClaimInput();
       if (!input) return false;
 
-      try { input.focus(); } catch {}
+      try { input.focus(); } catch { }
       await sleep(15);
 
       if (document.activeElement !== input) {
@@ -514,20 +514,13 @@
         LOG.info("RunMode:", runMode);
 
         // copy_only: stop early (we'll implement actual clipboard copy later)
-      // copy_only: copy claim number to clipboard, then stop (no navigation)
-if (runMode === "copy_only") {
-  const copied = await copyTextToClipboard(claim);
-
-  // Mark success so we don't re-run spammy, even if copy failed
-  await setSuccessState(req, claim);
-
-  if (copied) {
-    LOG.info("✅ SUCCESS (copy_only copied)", claim);
-  } else {
-    LOG.warn("Copy failed (clipboard blocked). Claim still stored in handoff.", claim);
-  }
-  return;
-}
+        // copy_only: copy claim number to clipboard, then stop (no navigation)
+        // copy_only: just log, don't attempt to copy again (portal did it) and don't navigate
+        if (runMode === "copy_only") {
+          await setSuccessState(req, claim);
+          LOG.info("✅ SUCCESS (copy_only - no nav)", claim);
+          return;
+        }
 
 
         if (!hasGuidewireUi()) {

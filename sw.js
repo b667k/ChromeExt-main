@@ -63,7 +63,7 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
   try {
     const t = await chrome.tabs.get(tabId);
     if (t?.status === "complete") return true;
-  } catch {}
+  } catch { }
 
   return new Promise((resolve) => {
     let done = false;
@@ -74,7 +74,7 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
       done = true;
       try {
         chrome.tabs.onUpdated.removeListener(onUpd);
-      } catch {}
+      } catch { }
       resolve(ok);
     };
 
@@ -208,11 +208,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "OPEN_CC") {
       // ✅ If user selected copy_only, we do NOT open ClaimCenter.
       // Copy happens in popup.js in a user-gesture context.
-      const runMode = await getRunMode();
-      if (runMode === "copy_only") {
-        sendResponse({ ok: true, skipped: true, reason: "copy_only_popup_copies" });
-        return;
-      }
+      // we allow copy_only to proceed so it opens the tab, but cc.js will halt.
+
 
       const req = msg.req;
       const url = buildCcUrl(req);
@@ -220,7 +217,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Optionally re-assert ownerReq to reduce race windows
       try {
         await chrome.storage.local.set({ ownerReq: req });
-      } catch {}
+      } catch { }
 
       let tab = await findExistingProcessTab();
 

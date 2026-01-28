@@ -145,8 +145,7 @@
           } else {
             alert("Clipboard copy failed. Context might be insecure.");
           }
-          // We do NOT send OPEN_CC because sw.js will just ignore it anyway
-          return;
+          // We proceed to open the new tab as requested, but CC.js will know not to do anything
         }
 
         const req = uniqueReq();
