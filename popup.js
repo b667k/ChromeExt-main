@@ -24,6 +24,8 @@ async function saveSettings(next) {
 }
 
 // -------------------- Clipboard (popup context) --------------------
+let CACHED_CLAIM = "";
+
 async function getHandoffClaim() {
   try {
     const data = await chrome.storage.local.get("handoff");
@@ -32,6 +34,11 @@ async function getHandoffClaim() {
     return "";
   }
 }
+
+// Pre-fetch immediately so copy is synchronous
+getHandoffClaim().then((c) => {
+  CACHED_CLAIM = c;
+});
 
 async function copyToClipboardFromPopup(text) {
   const value = String(text || "").trim();
@@ -91,7 +98,8 @@ async function initSettings() {
   const copyBtn = document.getElementById("copyClaimNow");
 
   async function doCopyClaim() {
-    const claim = await getHandoffClaim();
+    // Attempt synchronous read first to satisfy clipboard API
+    const claim = CACHED_CLAIM || (await getHandoffClaim());
     if (!claim) {
       setStatus("No claim found to copy yet.", "err");
       return;

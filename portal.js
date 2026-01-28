@@ -3,6 +3,31 @@
   const DEBUG = false;
   const log = (...a) => DEBUG && console.log("[P2CC]", ...a);
 
+  // --- Settings ---
+  const SETTINGS_KEY = "settings_v1";
+  const DEFAULT_SETTINGS = { runMode: "full" };
+
+  async function getRunMode() {
+    try {
+      const data = await chrome.storage.sync.get(SETTINGS_KEY);
+      return data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
+    } catch {
+      return DEFAULT_SETTINGS.runMode;
+    }
+  }
+
+  function getBtnLabel(mode) {
+    if (mode === "copy_only") return "Copy Claim #";
+    if (mode === "claim_only") return "Search ECC (Stops at Claim)";
+    return "Search ECC (Full)";
+  }
+
+  function updateButtonLabels(mode) {
+    const btns = document.querySelectorAll("#p2ccBtn");
+    const txt = getBtnLabel(mode);
+    btns.forEach(b => b.textContent = txt);
+  }
+
   function getClaimNumberFromTaskDescription() {
     const el = document.querySelector("#taskDescription");
     const text = el?.innerText?.trim() || "";
@@ -45,13 +70,14 @@
     return c;
   }
 
-  function addButton(container) {
+  async function addButton(container) {
     if (!container || container.querySelector("#p2ccBtn")) return;
 
     const btn = document.createElement("button");
     btn.type = "button";
     btn.id = "p2ccBtn";
-    btn.textContent = "Search ECC";
+    const mode = await getRunMode();
+    btn.textContent = getBtnLabel(mode);
     btn.className = "btn btn-primary-variant btn-mainframe";
     btn.style.marginLeft = "6px";
 
@@ -59,7 +85,7 @@
 
     btn.addEventListener(
       "click",
-      (e) => {
+      async (e) => {
         e.preventDefault();
         e.stopPropagation();
 
@@ -70,6 +96,21 @@
         const claim = getClaimNumberFromTaskDescription();
         if (!claim) {
           alert("Could not find Claim # in #taskDescription.");
+          return;
+        }
+
+        // If copy_only, we handle it here because sw.js blocks it (and we can do it faster + feedback)
+        const currentMode = await getRunMode();
+        if (currentMode === "copy_only") {
+          try {
+            await navigator.clipboard.writeText(claim);
+            const originalText = btn.textContent;
+            btn.textContent = "Copied!";
+            setTimeout(() => btn.textContent = originalText, 1500);
+          } catch (err) {
+            alert("Clipboard copy failed: " + err);
+          }
+          // We do NOT send OPEN_CC because sw.js will just ignore it anyway
           return;
         }
 
@@ -115,6 +156,16 @@
     const c = ensureContainer();
     addButton(c);
   }
+
+  // --- Init ---
+
+  // Watch for settings changes to update labels live
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "sync" && changes[SETTINGS_KEY]) {
+      const newMode = changes[SETTINGS_KEY].newValue?.runMode || DEFAULT_SETTINGS.runMode;
+      updateButtonLabels(newMode);
+    }
+  });
 
   // Try immediately
   tryAdd();
