@@ -24,20 +24,21 @@ async function saveSettings(next) {
 }
 
 // -------------------- Clipboard (popup context) --------------------
-let CACHED_CLAIM = "";
-
-async function getHandoffClaim() {
+async function getHandoffInfo() {
   try {
     const data = await chrome.storage.local.get("handoff");
-    return (data?.handoff?.claim || "").trim();
+    return {
+      claim: (data?.handoff?.claim || "").trim(),
+      policy: (data?.handoff?.policy || "").trim()
+    };
   } catch {
-    return "";
+    return { claim: "", policy: "" };
   }
 }
 
 // Pre-fetch immediately so copy is synchronous
-getHandoffClaim().then((c) => {
-  CACHED_CLAIM = c;
+getHandoffInfo().then((info) => {
+  CACHED_CLAIM = info.claim;
 });
 
 async function copyToClipboardFromPopup(text) {
@@ -50,7 +51,7 @@ async function copyToClipboardFromPopup(text) {
       await navigator.clipboard.writeText(value);
       return true;
     }
-  } catch {}
+  } catch { }
 
   // Fallback
   try {
@@ -99,7 +100,8 @@ async function initSettings() {
 
   async function doCopyClaim() {
     // Attempt synchronous read first to satisfy clipboard API
-    const claim = CACHED_CLAIM || (await getHandoffClaim());
+    const info = await getHandoffInfo();
+    const claim = CACHED_CLAIM || info.claim;
     if (!claim) {
       setStatus("No claim found to copy yet.", "err");
       return;
@@ -166,10 +168,8 @@ function safeUserUrl(url) {
   return url;
 }
 
-async function getActiveTabInfo() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab ? { url: tab.url || "", title: tab.title || "" } : { url: "", title: "" };
-}
+// Removed getActiveTabInfo as it is no longer used for URL logic
+
 
 // -------------------- Tabs --------------------
 function initTabs() {
@@ -218,12 +218,18 @@ async function openFeedbackEmailDraft() {
   setStatus("Opening email draft…");
 
   try {
-    const tabInfo = await getActiveTabInfo();
+    // const tabInfo = await getActiveTabInfo();  <-- No longer need tab info
     const kind = fbTypeLabel(fbType);
     const subject = `Portal ↔ ClaimCenter Extension — ${kind}`;
 
-    const urlToInclude =
-      includeUrlEl && includeUrlEl.checked ? safeUserUrl(tabInfo.url) : "";
+    const info = await getHandoffInfo();
+    const includeData = includeUrlEl && includeUrlEl.checked; // Reusing this ID for "Include Data"
+
+    const dataBlock = [];
+    if (includeData) {
+      if (info.claim) dataBlock.push(`Claim: ${info.claim}`);
+      if (info.policy) dataBlock.push(`Policy: ${info.policy}`);
+    }
 
     const body = [
       "Hi Blaine,",
@@ -232,8 +238,8 @@ async function openFeedbackEmailDraft() {
       "",
       msgText,
       "",
-      urlToInclude ? "Where I was when it happened:" : "",
-      urlToInclude ? urlToInclude : "",
+      dataBlock.length > 0 ? "Context:" : "",
+      ...dataBlock,
       "",
       "Thanks!",
     ]
@@ -276,7 +282,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const m = chrome.runtime.getManifest();
     const v = document.getElementById("extVersion");
     if (v) v.textContent = m?.version || "—";
-  } catch {}
+  } catch { }
 
   initTabs();
   initFeedbackButtons();

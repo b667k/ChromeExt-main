@@ -35,6 +35,18 @@
     return m ? m[1] : "";
   }
 
+  function getPolicyNumberFromTaskDescription() {
+    const el = document.querySelector("#taskDescription");
+    const text = el?.innerText?.trim() || "";
+    // Attempt to find a policy-like string (e.g. Q101...) if present
+    // Adjust regex as needed for your specific policy formats
+    const m = text.match(/\b([A-Z]\d{6,12})\b/);
+    if (m && m[1] !== getClaimNumberFromTaskDescription()) {
+      return m[1];
+    }
+    return "";
+  }
+
   function uniqueReq() {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
@@ -154,8 +166,10 @@
           const oldKick = Number(res?.kick || 0);
           const kick = oldKick + 1;
 
+          const policy = getPolicyNumberFromTaskDescription();
+
           const payload = {
-            handoff: { claim, req, ts: Date.now() },
+            handoff: { claim, policy, req, ts: Date.now() },
             ownerReq: req,
             kick,
           };
