@@ -39,6 +39,41 @@
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  // Helper for mixed contexts (HTTP/HTTPS)
+  async function copyToClipboard(text) {
+    const value = String(text || "").trim();
+    if (!value) return false;
+
+    // 1. Try modern API (if secure context)
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch (e) {
+      log("navigator.clipboard failed", e);
+    }
+
+    // 2. Fallback: textarea + execCommand
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
+      ta.setAttribute("readonly", "");
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch (e) {
+      log("execCommand failed", e);
+      return false;
+    }
+  }
+
   function ensureContainer() {
     // 1) Use existing container if present
     let c = document.querySelector("#tm-custom-mainframe-buttons");
@@ -102,13 +137,13 @@
         // If copy_only, we handle it here because sw.js blocks it (and we can do it faster + feedback)
         const currentMode = await getRunMode();
         if (currentMode === "copy_only") {
-          try {
-            await navigator.clipboard.writeText(claim);
+          const success = await copyToClipboard(claim);
+          if (success) {
             const originalText = btn.textContent;
             btn.textContent = "Copied!";
             setTimeout(() => btn.textContent = originalText, 1500);
-          } catch (err) {
-            alert("Clipboard copy failed: " + err);
+          } else {
+            alert("Clipboard copy failed. Context might be insecure.");
           }
           // We do NOT send OPEN_CC because sw.js will just ignore it anyway
           return;
