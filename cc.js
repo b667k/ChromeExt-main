@@ -499,19 +499,47 @@
         }
 
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
-        if (!handoff?.claim || !handoff?.req) return;
-        if (ownerReq !== handoff.req) return;
 
-        const alreadyDone = (lastReq === handoff.req && lastClaim === handoff.claim);
+        // 1. Determine target claim and request ID
+        // Priority: URL parameters > Storage (Latest handoff)
+        const urlParams = new URLSearchParams(location.search);
+        const urlClaim = urlParams.get("claimNumber") || "";
+        const urlReq = birthReq(); // tm_t from URL
+
+        let targetClaim = "";
+        let targetReq = "";
+
+        if (urlClaim) {
+          // If claimNumber is in URL, trust it (robust fallback for interop with VBS)
+          targetClaim = urlClaim;
+          targetReq = urlReq;
+        } else if (handoff?.claim && handoff?.req === urlReq) {
+          // Otherwise, only process if the storage handoff matches this tab's URL ID
+          targetClaim = handoff.claim;
+          targetReq = handoff.req;
+        }
+
+        if (!targetClaim) return;
+
+        // 2. Global "latest wins" check
+        // If there's an active ownerReq in storage that is NEWER/DIFFERENT than our current targetReq,
+        // we might be an old tab that should stop. 
+        // Note: We allow VBS hardcoded IDs to bypass this if they are the current tab.
+        if (ownerReq && ownerReq !== targetReq && !urlClaim) {
+          LOG.warn("Handoff mismatch, stopping. ownerReq:", ownerReq, "targetReq:", targetReq);
+          return;
+        }
+
+        const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
         if (alreadyDone && kick === lastSeenKick) return;
 
         lastSeenKick = kick;
-        const req = handoff.req;
-        const claim = handoff.claim;
+        const req = targetReq;
+        const claim = targetClaim;
 
         // Load runMode each run (cached + cheap). Default: full
         const runMode = await loadRunMode(); // full | claim_only | copy_only
-        LOG.info("RunMode:", runMode);
+        LOG.info("RunMode:", runMode, "Claim:", claim);
 
         // copy_only: stop early (we'll implement actual clipboard copy later)
         // copy_only: copy claim number to clipboard, then stop (no navigation)

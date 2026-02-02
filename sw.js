@@ -27,10 +27,11 @@ async function getRunMode() {
 // -----------------------
 // CLAIMCENTER AUTOMATION
 // -----------------------
-function buildCcUrl(req) {
+function buildCcUrl(req, claim) {
   const u = new URL(CC_URL_BASE);
   u.searchParams.set("tm_t", String(req));
   u.searchParams.set("process", "true");
+  if (claim) u.searchParams.set("claimNumber", String(claim));
   return u.toString();
 }
 
@@ -212,7 +213,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 
       const req = msg.req;
-      const url = buildCcUrl(req);
+      let claim = "";
+      try {
+        const data = await chrome.storage.local.get("handoff");
+        if (data?.handoff?.req === req) {
+          claim = data.handoff.claim;
+        }
+      } catch { }
+
+      const url = buildCcUrl(req, claim);
 
       // Optionally re-assert ownerReq to reduce race windows
       try {
