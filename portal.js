@@ -117,6 +117,89 @@
     return c;
   }
 
+  // --- PA Auto Support ---
+  let lastPromptedClaim = "";
+
+  function getDriverStatusFromTaskDescription() {
+    const td = document.querySelector("#taskDescription");
+    const text = td?.innerText || "";
+    // VBScript logic: isDefaultDriver = (Me.DriverNum = "DD")
+    // Also matching literals "Default Driver" or "Unknown Driver"
+    if (/\bDD\b/.test(text) || /Default Driver/i.test(text) || /Unknown Driver/i.test(text)) {
+      return "DD";
+    }
+    return "";
+  }
+
+  async function triggerHandoff() {
+    const claim = getClaimNumberFromTaskDescription();
+    if (!claim) {
+      alert("Could not find Claim # in #taskDescription.");
+      return;
+    }
+
+    const currentMode = await getRunMode();
+    if (currentMode === "copy_only") {
+      const success = await copyToClipboard(claim);
+      if (success) {
+        // Find existing button for visual feedback if possible
+        const btn = document.querySelector("#p2ccBtn");
+        if (btn) {
+          const originalText = btn.textContent;
+          btn.textContent = "Copied!";
+          setTimeout(() => btn.textContent = originalText, 1500);
+        }
+      } else {
+        alert("Clipboard copy failed. Context might be insecure.");
+      }
+    }
+
+    const req = uniqueReq();
+    chrome.storage.local.get(["kick"], (res) => {
+      const oldKick = Number(res?.kick || 0);
+      const kick = oldKick + 1;
+      const policy = getPolicyNumberFromTaskDescription();
+      const payload = {
+        handoff: { claim, policy, req, ts: Date.now() },
+        ownerReq: req,
+        kick,
+      };
+
+      chrome.storage.local.set(payload, () => {
+        try {
+          chrome.runtime.sendMessage({ type: "OPEN_CC", req }, () => { });
+        } catch {
+          // ignore
+        }
+      });
+    });
+  }
+
+  function checkPaAutoTriggers() {
+    const claim = getClaimNumberFromTaskDescription();
+    if (!claim || claim === lastPromptedClaim) return;
+
+    const status = getDriverStatusFromTaskDescription();
+    if (status === "DD") {
+      lastPromptedClaim = claim;
+
+      const message =
+        `PA AUTO FLOWCHART TRACE:\n` +
+        `1. Driver on claim: Default Driver (DD)\n` +
+        `2. Driver listed on policy: Unknown / needs verification\n\n` +
+        `ACTION:\n` +
+        `1. Check ECC/PUDR for driver name.\n` +
+        `2. If not listed, begin Claim by Unknown Driver procedure.\n` +
+        `3. If listed, continue flowchart as normal.\n\n` +
+        `OPEN ECC NOW?\n` +
+        `Click Yes to open ECC ClaimCenter in Google Chrome (passes claim # in the URL).`;
+
+      if (confirm(message)) {
+        triggerHandoff();
+      }
+    }
+  }
+
   async function addButton(container) {
     if (!container || container.querySelector("#p2ccBtn")) return;
 
@@ -140,58 +223,7 @@
         cooldown = true;
         setTimeout(() => (cooldown = false), 300);
 
-        const claim = getClaimNumberFromTaskDescription();
-        if (!claim) {
-          alert("Could not find Claim # in #taskDescription.");
-          return;
-        }
-
-        // If copy_only, we handle it here because sw.js blocks it (and we can do it faster + feedback)
-        const currentMode = await getRunMode();
-        if (currentMode === "copy_only") {
-          const success = await copyToClipboard(claim);
-          if (success) {
-            const originalText = btn.textContent;
-            btn.textContent = "Copied!";
-            setTimeout(() => btn.textContent = originalText, 1500);
-          } else {
-            alert("Clipboard copy failed. Context might be insecure.");
-          }
-          // We proceed to open the new tab as requested, but CC.js will know not to do anything
-        }
-
-        const req = uniqueReq();
-
-        chrome.storage.local.get(["kick"], (res) => {
-          const oldKick = Number(res?.kick || 0);
-          const kick = oldKick + 1;
-
-          const policy = getPolicyNumberFromTaskDescription();
-
-          const payload = {
-            handoff: { claim, policy, req, ts: Date.now() },
-            ownerReq: req,
-            kick,
-          };
-
-          chrome.storage.local.set(payload, () => {
-            const err = chrome.runtime.lastError;
-            if (err) {
-              // optional: keep warnings off unless DEBUG
-              log("storage.set warning", err?.message || err);
-            } else {
-              log("handoff set", { claim, req, kick });
-            }
-
-            try {
-              chrome.runtime.sendMessage({ type: "OPEN_CC", req }, () => {
-                // ignore context invalidation etc.
-              });
-            } catch {
-              // ignore
-            }
-          });
-        });
+        triggerHandoff();
       },
       true
     );
@@ -203,6 +235,7 @@
   function tryAdd() {
     const c = ensureContainer();
     addButton(c);
+    checkPaAutoTriggers();
   }
 
   // --- Init ---
