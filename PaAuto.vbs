@@ -70,6 +70,8 @@ Class MainDriver
         Set Claim = New Claim
 
         Dim Action, ActionTaken, Comment
+        Dim MsgResult
+        
         Set Action = CreateObject("Scripting.Dictionary")
         ActionTaken = True
         
@@ -126,7 +128,7 @@ Class MainDriver
         ElseIf Claim.isDefaultDriver() Then
             Comment = Claim.ClaimNumber & ", Sent Unknown Driver email for NAME_HERE, driver in " & Claim.DOL & " loss."
             Action("Title") = "[B.] DEFAULT DRIVER"
-            Action("Type") = vbInformation
+            Action("Type") = vbYesNo + vbQuestion
             Action("Text") = _
                 "FLOWCHART TRACE:" & vbCrLf & _
                 "1. Driver on claim: Default Driver (DD)" & vbCrLf & _
@@ -136,7 +138,9 @@ Class MainDriver
                 "2. If not listed, begin Claim by Unknown Driver procedure." & vbCrLf & _
                 "3. If listed, continue flowchart as normal." & vbCrLf & vbCrLf & _
                 "CLIPBOARD (DIARY):" & vbCrLf & _
-                Comment
+                Comment & vbCrLf & vbCrLf & _
+                "OPEN ECC NOW?" & vbCrLf & _
+                "Click Yes to open ECC ClaimCenter in Google Chrome (passes claim # in the URL)."
 
         ElseIf Claim.isStolenVehicle() Then
             Comment = Claim.ClaimNumber & " " & Claim.DOL & " " & Claim.FaultRating & ", Refer to UW - Stolen vehicle."
@@ -172,7 +176,7 @@ Class MainDriver
                 Err.Clear
                 Comment = Claim.ClaimNumber
                 Action("Title") = "[?.] DRIVER NUMBER EMPTY!?"
-                Action("Type") = vbInformation
+                Action("Type") = vbYesNo + vbQuestion
                 Action("Text") = _
                     "FLOWCHART TRACE:" & vbCrLf & _
                     "1. Driver on claim: Present (" & Claim.DriverNum & ")" & vbCrLf & _
@@ -184,7 +188,9 @@ Class MainDriver
                     "2. If the driver is listed, continue the flowchart as normal." & vbCrLf & _
                     "3. If not, begin the Unknown Driver procedure." & vbCrLf & vbCrLf & _
                     "CLIPBOARD (CLAIM #):" & vbCrLf & _
-                    Comment
+                    Comment & vbCrLf & vbCrLf & _
+                    "OPEN ECC NOW?" & vbCrLf & _
+                    "Click Yes to open ECC ClaimCenter in Google Chrome (passes claim # in the URL)."
             Else
                 ActionTaken = False
             End If
@@ -319,7 +325,6 @@ Class MainDriver
                                     Comment
                             End If
 
-                            ' If common driver is not named insured or spouse.
                         Else
                             Comment = Claim.ClaimNumber & " " & Claim.DOL & " " & Claim.Driver.Name & " " & Claim.FaultRating & ", Refer to UW - 2+ AFA within 3 yrs of renewal by same driver, not named insured or spouse."
                             Action("Title") = "[H.] At FAULT"
@@ -337,10 +342,7 @@ Class MainDriver
                                 Comment
                         End If
 
-                        ' Different drivers (no driver with 2+ AFA losses).
                     Else
-                        ' If renewal is in less than 4 months.
-                        ' _MARKER_01_
                         If Claim.isPolicyWithin4MonthsOfRenewal() Then
                             Comment = Claim.ClaimNumber & " " & Claim.DOL & " " & Claim.Driver.Name & " " & Claim.FaultRating & ", Refer to UW - 2+ AFA by different drivers within 3 yrs of renewal."
                             Action("Title") = "[G.] AT FAULT"
@@ -355,8 +357,6 @@ Class MainDriver
                                 "1. Refer to underwriter. Note PUCM." & vbCrLf & vbCrLf & _
                                 "CLIPBOARD (PUCM):" & vbCrLf & _
                                 Comment
-
-                            ' If renewal is not within 4 months.
                         Else
                             Comment = Claim.ClaimNumber & " " & Claim.DOL & " " & Claim.Driver.Name & " " & Claim.FaultRating & ", Set FS for UW to review for PCM - 2+ AFA by different drivers within 3 yrs of renewal."
                             Action("Title") = "[E.] AT FAULT"
@@ -380,13 +380,16 @@ Class MainDriver
             End If
         End If
         
-        ' MsgBox P.ToString()
-        C.GoToClaim(Claim.ClaimNumber)
-        T.CopyToClipboard(Comment)
-        MsgBox Action("Text"), Action("Type"), Action("Title")
+        ' Return to claim, copy clipboard, and show message.
+        C.GoToClaim Claim.ClaimNumber
+        T.CopyToClipboard Comment
+        
+        MsgResult = MsgBox(Action("Text"), Action("Type"), Action("Title"))
+        If MsgResult = vbYes Then
+            T.OpenECCClaimCenter Claim.ClaimNumber
+        End If
+
     End Sub
-
-
 End Class
 
 Class Policy
@@ -412,8 +415,8 @@ Class Policy
         Dim AFAs()
         Dim idx, i
         
-        idx = - 1
-        ReDim AFAs( - 1)
+        idx = -1
+        ReDim AFAs(-1)
         
         If Not IsArray(Me.RecentClaims) Then
             RecentAFAClaims = AFAs
@@ -449,18 +452,6 @@ Class Claim
     Public Causes
     Public Driver
 
-    ' NOTES
-    '  - Known med-only properties:
-    '     - Desc:
-    '       - PIP ONLY, MED ONLY
-    '     - Causes:
-    '        - FPBMED, FPBINC
-    '  - Known towing/roadside assistance properties:
-    '     - Desc:
-    '        - ROADSIDE ASSISTANCE LOSS, TOWING
-    '     - Causes:
-    '        - RSDRVC
-
     Public Sub ScrapeClaimDetails()
         If Not C.OnClaimsDetailScrn Then
             Err.Raise 0, "Claim Class, ScrapeAndInit()", "Not on claim detail screen."
@@ -475,42 +466,49 @@ Class Claim
         Me.RenewalDate = T.GetRenewalFromStart(Me.StartDate)
         Me.Causes = C.Causes()
     End Sub
+
     Public Sub ScrapeDriverData()
         If IsNumeric(Me.DriverNum) Then
             Set Driver = C.GetDriverDetailsFromPUDR(Me.DriverNum)
         End If
     End Sub
+
     Public Property Get isPolicyWithin4MonthsOfRenewal
         isPolicyWithin4MonthsOfRenewal = T.AreDatesWithin(Me.RenewalDate, Date, 0, 4, 0)
     End Property
+
     Public Property Get isLossWithinFirst60Days()
         isLossWithinFirst60Days = T.AreDatesWithin(Me.StartDate, Me.DOL, 0, 0, 60)
     End Property
+
     Public Property Get isNoDriver()
         isNoDriver = (Me.DriverNum = "ND")
     End Property
+
     Public Property Get isDefaultDriver()
         isDefaultDriver = (Me.DriverNum = "DD")
     End Property
+
     Public Property Get isStolenVehicle()
         isStolenVehicle = (Me.DriverNum = "SN")
     End Property
+
     Public Property Get isNotAtFault()
         isNotAtFault = (Me.FaultRating = "NF")
     End Property
+
     Public Property Get isAtFault()
         isAtFault = (Me.FaultRating = "AF")
     End Property
+
     Public Property Get isNoFaultRating()
         isNoFaultRating = (Me.FaultRating = "UN" Or Me.FaultRating = "")
     End Property
+
     Public Property Get isRoadsideAssistanceLoss()
         isRoadsideAssistanceLoss = False
         If Me.Description = "ROADSIDE ASSISTANCE LOSS" Then
             isRoadsideAssistanceLoss = True
-            ' TODO: Update the secondary check by gathering a list of known 
-            ' roadside assistance loss cause codes. The only known one as of 
-            ' right now is RSDRVC.
         Else
             Dim Cause
             For Each Cause In Me.Causes
@@ -521,14 +519,14 @@ Class Claim
             Next
         End If
     End Property
+
     Public Property Get isGlassLoss()
         isGlassLoss = False
         If Me.Description = "GLASS LOSS" Then
             isGlassLoss = True
-            ' TODO: Implement a secondary, more thorough check by comparing 
-            ' the cause list against a list of known glass loss cause codes.
         End If
     End Property
+
     Public Property Get isMedOnly()
         Dim MedOnly
         MedOnly = True
@@ -575,6 +573,7 @@ Class Tools
         End If
         ArrayLen = UBound(arr) - LBound(arr) + 1
     End Function
+
     ' Computes age in years from DOB.
     Public Function AgeFromBirth(Birth)
         Dim DOB
@@ -586,12 +585,14 @@ Class Tools
             AgeFromBirth = AgeFromBirth - 1
         End If
     End Function
+
     Function RS(Len, row, col)
         Dim buf
-        buf = String(Len, " ") ' pre-size helps avoid odd blanks sometimes
+        buf = String(Len, " ")
         MFScreen.ReadScreen buf, Len, row, col
         RS = Trim(buf)
     End Function
+
     Sub GetMostCommonDriverNum(ClaimsArr, ByRef MaxCount, ByRef MostCommonValue)
         Dim Counts, I, Key
         Set Counts = CreateObject("Scripting.Dictionary")
@@ -610,65 +611,92 @@ Class Tools
             End If
         Next
     End Sub
+
     Function AreDatesWithin(Date1, Date2, Years, Months, Days)
-        ' Return true if dates are within a given time frame.
         Dim maxDate, minDate
         
-        ' Build the allowed range from date1
         maxDate = DateAdd("d", Days, _
             DateAdd("m", Months, _
             DateAdd("yyyy", Years, Date1)))
         
-        minDate = DateAdd("d", - Days, _
-            DateAdd("m", - Months, _
-            DateAdd("yyyy", - Years, Date1)))
+        minDate = DateAdd("d", -Days, _
+            DateAdd("m", -Months, _
+            DateAdd("yyyy", -Years, Date1)))
         
-        ' Check if Date2 falls within the range
         AreDatesWithin = (Date2 >= minDate And Date2 <= maxDate)
     End Function
+
     Function GetRenewalFromStart(StartDate)
-        ' Calculate and return renewal date from the start date.
         Do While StartDate < Date
             StartDate = DateAdd("yyyy", 1, StartDate)
         Loop
-
         GetRenewalFromStart = StartDate
     End Function
+
     ' Copy text to clipboard.
     Sub CopyToClipboard(text)
         Dim html
         Set html = CreateObject("htmlfile")
         html.ParentWindow.ClipboardData.SetData "text", CStr(text)
     End Sub
+
     Public Function ParseMMDDYY(s)
-        ' Parse MM-DD-YY dates to Date objects.
         Dim m, d, y
-        s = Trim(s) ' Remove whitespace.
+        s = Trim(s)
         m = CInt(Mid(s, 1, 2))
         d = CInt(Mid(s, 4, 2))
         y = CInt(Mid(s, 7, 2))
         ParseMMDDYY = DateSerial(y, m, d)
     End Function
+
     Public Function ParseMMDDYYYY(s)
-        ' Parse MMDDYYYY dates to Date objects.
         Dim m, d, y
-        s = Trim(s) ' Remove whitespace.
+        s = Trim(s)
         m = CInt(Mid(s, 1, 2))
         d = CInt(Mid(s, 3, 2))
         y = CInt(Mid(s, 5, 4))
         ParseMMDDYYYY = DateSerial(y, m, d)
     End Function
+
+    ' Open ECC ClaimCenter in Google Chrome (passes claim number in URL)
+    Public Sub OpenECCClaimCenter(ClaimNum)
+        Dim urlBase, url
+        Dim shApp
+
+        urlBase = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1770060557549-sr6xr8&process=true"
+
+        ClaimNum = Trim(CStr(ClaimNum))
+        If Len(ClaimNum) > 0 Then
+            url = urlBase & "&claimNumber=" & ClaimNum
+        Else
+            url = urlBase
+        End If
+
+        On Error Resume Next
+        Set shApp = CreateObject("Shell.Application")
+        Err.Clear
+
+        ' Try Chrome first
+        shApp.ShellExecute "chrome.exe", url, "", "open", 1
+
+        ' Fall back to default browser
+        If Err.Number <> 0 Then
+            Err.Clear
+            shApp.ShellExecute url, "", "", "open", 1
+        End If
+
+        On Error GoTo 0
+    End Sub
 End Class
 
 Class ClaimsController
     ' Scrape all claims within three years of policy renewal.
     Public Function GetRecentClaims()
-        ' Initial claim to return to after function.
         Dim InitialClaim
         InitialClaim = C.ClaimNumber()
 
         Dim Claims()
-        ReDim Claims( - 1)
+        ReDim Claims(-1)
 
         Me.GoToPolicy "PUUR"
         MFScreen.SendKeys("A<Enter>")
@@ -692,19 +720,17 @@ Class ClaimsController
             
             MFScreen.SendKeys("<Enter>")
         Loop
-        ' Return to initial claim.
+
         Me.GoToClaim InitialClaim
         GetRecentClaims = Claims
     End Function
     
     Public Function Causes()
-        ' Create empty array.
         Dim CausesArr()
-        ReDim CausesArr( - 1)
+        ReDim CausesArr(-1)
         
-        ' Scrape causes.
         Dim i, Spillage
-        Spillage = True ' If causes spill to the next page.
+        Spillage = True
         Do While (Spillage = True)
             For i = 0 To 6 Step 2
                 Dim CauseLabel, Cause
@@ -730,49 +756,38 @@ Class ClaimsController
     End Function
 
     Public Function PolicyNumber()
-        ' Scrape policy number from screen.
         PolicyNumber = T.RS(11, 2, 8)
     End Function
     
     Public Function ClaimNumber()
-        ' Scrape claim number from screen.
         ClaimNumber = T.RS(12, 7, 10)
     End Function
     
     Public Function DOL()
-        ' Scrape date of loss from screen.
         DOL = T.ParseMMDDYY(T.RS(8, 9, 20))
     End Function
     
     Public Function DriverNum()
-        ' Scrape driver number from screen.
         DriverNum = T.RS(2, 10, 34)
     End Function
     
     Public Function FaultRating()
-        ' Scrape fault rating from screen.
         FaultRating = T.RS(2, 10, 36)
     End Function
     
     Public Function StartDate()
-        ' Scrape start date from screen.
         StartDate = T.ParseMMDDYY(T.RS(8, 2, 73))
     End Function
     
     Public Function PolicyCancelled()
-        ' Check if policy is cancelled.
         PolicyCancelled = (T.RS(9, 6, 56) = "CANCELLED")
     End Function
     
     Public Function OnClaimsScrn()
-        ' Check if on the claims screen (not to be confused w/ claims detail screen).
-        ' Returns true if on claims screen.
         OnClaimsScrn = (T.RS(18, 6, 31) = "SECTION I - CLAIMS")
     End Function
     
     Public Function OnClaimsDetailScrn()
-        ' Check if on the claims detail screen.
-        ' Returns true if currently on claims detail screen.
         OnClaimsDetailScrn = (T.RS(28, 6, 26) = "SECTION I - CLAIMS  (DETAIL)")
     End Function
     
@@ -783,14 +798,9 @@ Class ClaimsController
     End Function
     
     Public Function GoToClaim(ClaimNumber)
-        ' Navigates to a given claim on a policy.
-        ' Go to PUBC screen for the policy.
         Me.GoToPolicy "PUUR"
-
-        ' View first policy.
         MFScreen.SendKeys("A<Enter>")
 
-        ' Go to the next claim until its the one we want.
         Do While C.ClaimNumber <> ClaimNumber
             MFScreen.WaitReady 1, 0
             MFScreen.SendKeys("<Enter>")
@@ -798,33 +808,26 @@ Class ClaimsController
     End Function
     
     Public Function GetDriverDetailsFromPUDR(DriverNumStr)
-        ' Get driver name, age, and driver number from PUDR.
-        ' Returns dict object.
         MFScreen.SendKeys("<Clear>PUDR " & P.Number & "<Enter>")
         While True
             MFScreen.WaitReady 1, 0
             Dim i
             For i = 0 To 2
-                ' Initialize variables.
                 Dim Driver, Number, Name, Birth, Age, Relationship, IsDriverNumberEmpty
                 Set Driver = New Driver
                 
-                ' Scrape values from screen.
                 Number = T.RS(2, 4 + i, 2)
                 Name = T.RS(31, 4 + i, 7)
                 Birth = T.RS(8, 4 + i, 62)
                 Relationship = T.RS(1, 9 + i, 72)
 
-                ' Trim name.
                 Name = Trim(Name)
 
-                ' Check for ghost driver! (No driver listed as the given driver number.)
                 IsDriverNumberEmpty = (Name <> "" And Birth <> "" And Relationship <> "")
-                If ( Not IsDriverNumberEmpty) Then
+                If (Not IsDriverNumberEmpty) Then
                     Err.Raise 123, "DriverNumberEmpty", "No driver listed under driver number " & DriverNumStr & "."
                 End If
 
-                ' If target driver, create driver object w/ data and return it.
                 If (Number = DriverNumStr) Then
                     Age = T.AgeFromBirth(Birth)
                     Driver.Init Number, Name, Age, Relationship
