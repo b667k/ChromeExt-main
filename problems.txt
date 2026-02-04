@@ -1,0 +1,4 @@
+ok for some reason the button doesnt work its like we didnt clear or arent running the process like the google chrome extension wont run.
+https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1770060557549-sr6xr8&process=true&claimNumber=A00007282453
+
+Run claim only doesnt work too in the chrome ext for some reason it breaks and wont run further then opening CC it opens then spams the search button and wont let you click anything 
