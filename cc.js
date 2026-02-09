@@ -532,9 +532,16 @@
           }
           if (!targetClaim) return;
           const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
-          if (alreadyDone && kick === lastSeenKick) return;
-          // New claim detected, reset flag
-          automationDisabled = false;
+          // If claim comes from URL (VBS), always reset and allow re-run
+          if (urlClaim) {
+            LOG.info("Claim from URL detected while disabled, resetting automationDisabled flag");
+            automationDisabled = false;
+          } else if (alreadyDone && kick === lastSeenKick) {
+            return;
+          } else {
+            // New claim detected, reset flag
+            automationDisabled = false;
+          }
         }
 
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
@@ -570,16 +577,16 @@
         }
 
         const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
-        LOG.info("Already done check:", alreadyDone, "kick check:", kick === lastSeenKick, "lastReq:", lastReq, "targetReq:", targetReq, "lastClaim:", lastClaim, "targetClaim:", targetClaim);
+        const fromUrl = !!urlClaim;
+        LOG.info("Already done check:", alreadyDone, "kick check:", kick === lastSeenKick, "fromUrl:", fromUrl, "lastReq:", lastReq, "targetReq:", targetReq, "lastClaim:", lastClaim, "targetClaim:", targetClaim);
 
         // Allow re-running if claim comes from URL (e.g., PaAuto.vbs direct link)
-        const fromUrl = !!urlClaim;
-        if (alreadyDone && kick === lastSeenKick && !fromUrl) {
+        // When from URL, always allow re-run (user explicitly requested via VBS)
+        if (fromUrl) {
+          LOG.info("Claim from URL detected, forcing re-run (bypassing already-done check).");
+        } else if (alreadyDone && kick === lastSeenKick) {
           LOG.info("Already processed this claim, skipping.");
           return;
-        }
-        if (fromUrl) {
-          LOG.info("Claim from URL, allowing re-run.");
         }
 
         lastSeenKick = kick;

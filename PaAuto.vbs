@@ -661,7 +661,7 @@ Class Tools
     ' Open ECC ClaimCenter in Google Chrome (passes claim number in URL)
     Public Sub OpenECCClaimCenter(ClaimNum)
         Dim urlBase, url
-        Dim shApp
+        Dim shApp, chromePath, wshShell
 
         urlBase = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1770060557549-sr6xr8&process=true"
 
@@ -674,12 +674,26 @@ Class Tools
 
         On Error Resume Next
         Set shApp = CreateObject("Shell.Application")
+        Set wshShell = CreateObject("WScript.Shell")
         Err.Clear
 
-        ' Try Chrome first
-        shApp.ShellExecute "chrome.exe", url, "", "open", 1
+        ' Try to find Chrome path
+        chromePath = ""
+        If wshShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe\") <> "" Then
+            chromePath = wshShell.RegRead("HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe\")
+        ElseIf wshShell.RegRead("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe\") <> "" Then
+            chromePath = wshShell.RegRead("HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe\")
+        End If
 
-        ' Fall back to default browser
+        ' Try Chrome with proper path and URL as argument
+        If chromePath <> "" Then
+            shApp.ShellExecute chromePath, """" & url & """", "", "open", 1
+        Else
+            ' Fallback: try chrome.exe in PATH
+            shApp.ShellExecute "chrome.exe", """" & url & """", "", "open", 1
+        End If
+
+        ' If that failed, fall back to default browser
         If Err.Number <> 0 Then
             Err.Clear
             shApp.ShellExecute url, "", "", "open", 1
