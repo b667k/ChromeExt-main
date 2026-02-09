@@ -1,7 +1,3 @@
-https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1770060557549-sr6xr8&process=true&claimNumber=A00007307801
-
-
-
 [TM] Already done check: false kick check: false fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
 cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
@@ -58,168 +54,288 @@ cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: false fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
 cc.js:8 [TM] Checking hasGuidewireUi...
 cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
 cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at stillOwner (cc.js:353:21)
+    at runLoop (cc.js:644:21)
+err @ cc.js:10
+getState @ cc.js:343
+stillOwner @ cc.js:353
+runLoop @ cc.js:644
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:10 [TM] getState error: Error: Extension context invalidated.
+    at getState (cc.js:341:41)
+    at runLoop (cc.js:549:71)
+    at cc.js:496:43
+err @ cc.js:10
+getState @ cc.js:343
+runLoop @ cc.js:549
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: undefined targetReq: 1770060557549-sr6xr8 lastClaim: undefined targetClaim: A00007307801
 cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
+cc.js:10 [TM] loadRunMode error: Error: Extension context invalidated.
+    at loadRunMode (cc.js:22:46)
+    at runLoop (cc.js:610:31)
+err @ cc.js:10
+loadRunMode @ cc.js:27
+runLoop @ cc.js:610
+await in runLoop
+(anonymous) @ cc.js:496
+setTimeout
+schedule @ cc.js:496
+(anonymous) @ cc.js:752Understand this error
+cc.js:8 [TM] RunMode: full Claim: A00007307801
 cc.js:8 [TM] Proceeding with automation...
 cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1770664418293-efu40c targetReq: 1770060557549-sr6xr8 lastClaim: A00007296187 targetClaim: A00007307801
-cc.js:8 [TM] Claim from URL detected, forcing re-run (bypassing already-done check).
-cc.js:8 [TM] RunMode: claim_only Claim: A00007307801
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Waiting for page to stabilize..
