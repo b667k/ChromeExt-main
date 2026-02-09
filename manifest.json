@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Portal ↔ ClaimCenter Automation",
   "author": "Blaine Oler",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Open ClaimCenter from Portal and automate claim search + Loss Details.",
 
   "icons": {
