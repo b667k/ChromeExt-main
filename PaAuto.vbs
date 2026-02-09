@@ -662,8 +662,15 @@ Class Tools
     Public Sub OpenECCClaimCenter(ClaimNum)
         Dim urlBase, url
         Dim shApp, chromePath, wshShell
+        Dim tmId
 
-        urlBase = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1770060557549-sr6xr8&process=true"
+        ' Generate a unique request ID so the Chrome extension can distinguish each invocation
+        Randomize
+        tmId = CStr(Year(Now)) & Right("0" & Month(Now), 2) & Right("0" & Day(Now), 2) & _
+               Right("0" & Hour(Now), 2) & Right("0" & Minute(Now), 2) & Right("0" & Second(Now), 2) & _
+               "-" & Right("000000" & CStr(Int(Rnd() * 999999)), 6)
+
+        urlBase = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=" & tmId & "&process=true"
 
         ClaimNum = Trim(CStr(ClaimNum))
         If Len(ClaimNum) > 0 Then

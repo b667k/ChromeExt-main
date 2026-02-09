@@ -18,6 +18,7 @@
   let cachedRunMode = DEFAULT_SETTINGS.runMode;
 
   async function loadRunMode() {
+    if (!contextAlive) return cachedRunMode;
     try {
       const data = await chrome.storage.sync.get(SETTINGS_KEY);
       const mode = data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
@@ -25,6 +26,7 @@
       return mode;
     } catch (e) {
       LOG.err("loadRunMode error:", e);
+      if (isContextDead(e)) contextAlive = false;
       cachedRunMode = DEFAULT_SETTINGS.runMode;
       return cachedRunMode;
     }
@@ -335,21 +337,37 @@
   let automationDisabled = false; // Flag to stop interfering after success
   let failureCount = 0; // Track consecutive failures for same claim
   let lastFailedClaim = ""; // Track which claim we're failing on
+  let contextAlive = true; // False when extension context is invalidated — stops all loops
+  let processedUrlKey = ""; // "tm_t|claimNumber" we already completed (prevents infinite URL re-runs)
+  let urlBasedRun = false; // True when current run is URL-triggered (skip stillOwner checks)
+
+  function isContextDead(e) {
+    return e && String(e.message || e).includes("Extension context invalidated");
+  }
 
   async function getState() {
+    if (!contextAlive) return {};
     try {
       return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
     } catch (e) {
       LOG.err("getState error:", e);
+      if (isContextDead(e)) contextAlive = false;
       return {};
     }
   }
 
   async function setSuccessState(req, claim) {
-    await chrome.storage.local.set({ lastReq: req, lastClaim: claim });
+    if (!contextAlive) return;
+    try {
+      await chrome.storage.local.set({ lastReq: req, lastClaim: claim });
+    } catch (e) {
+      if (isContextDead(e)) contextAlive = false;
+    }
   }
 
   async function stillOwner(req) {
+    if (urlBasedRun) return true; // URL-based runs (VBS) bypass storage ownership check
+    if (!contextAlive) return false;
     const s = await getState();
     return s.ownerReq === req && s.handoff?.req === req;
   }
@@ -490,10 +508,11 @@
   // --- Scheduler & Watchdog ---
   let scheduled = false;
   function schedule(ms = 0) {
+    if (!contextAlive) return;
     if (running) { hasPendingRun = true; return; }
     if (scheduled) return;
     scheduled = true;
-    setTimeout(() => { scheduled = false; runLoop(); }, ms);
+    setTimeout(() => { scheduled = false; if (contextAlive) runLoop(); }, ms);
   }
 
   // --- Main Loop ---
@@ -517,31 +536,31 @@
           return;
         }
 
-        // If automation is disabled after success, only check for new claims
+        if (!contextAlive) return;
+
+        // If automation is disabled after success, only check for genuinely NEW claims
         if (automationDisabled) {
-          const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
           const urlParams = new URLSearchParams(location.search);
           const urlClaim = urlParams.get("claimNumber") || "";
           const urlReq = birthReq();
-          let targetClaim = "";
-          let targetReq = "";
           if (urlClaim) {
-            targetClaim = urlClaim;
-            targetReq = urlReq;
-          } else if (handoff?.claim && handoff?.req === urlReq) {
-            targetClaim = handoff.claim;
-            targetReq = handoff.req;
-          }
-          if (!targetClaim) return;
-          const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
-          // If claim comes from URL (VBS), always reset and allow re-run
-          if (urlClaim) {
-            LOG.info("Claim from URL detected while disabled, resetting automationDisabled flag");
+            // Only re-enable for a genuinely NEW URL claim (different key)
+            const urlKey = urlReq + "|" + urlClaim;
+            if (processedUrlKey === urlKey) {
+              return; // Same URL claim we already completed
+            }
+            LOG.info("New URL-based claim detected while disabled, re-enabling.");
             automationDisabled = false;
-          } else if (alreadyDone && kick === lastSeenKick) {
-            return;
           } else {
-            // New claim detected, reset flag
+            const { handoff, lastReq, lastClaim, kick } = await getState();
+            const targetClaim = (handoff?.claim && handoff?.req === urlReq) ? handoff.claim : "";
+            const targetReq = (handoff?.claim && handoff?.req === urlReq) ? handoff.req : "";
+            if (!targetClaim) return;
+            const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
+            if (alreadyDone && kick === lastSeenKick) {
+              return;
+            }
+            // New storage-based claim detected
             automationDisabled = false;
           }
         }
@@ -582,11 +601,14 @@
         const fromUrl = !!urlClaim;
         LOG.info("Already done check:", alreadyDone, "kick check:", kick === lastSeenKick, "fromUrl:", fromUrl, "lastReq:", lastReq, "targetReq:", targetReq, "lastClaim:", lastClaim, "targetClaim:", targetClaim);
 
-        // Allow re-running if claim comes from URL (e.g., PaAuto.vbs direct link)
-        // When from URL, always allow re-run (user explicitly requested via VBS)
+        // URL-based claims (VBS): only allow if we haven't already processed this exact URL
         if (fromUrl) {
-          LOG.info("Claim from URL detected, forcing re-run (bypassing already-done check).");
-          // Reset failure count for new URL-based claim
+          const urlKey = urlReq + "|" + targetClaim;
+          if (processedUrlKey === urlKey) {
+            LOG.info("Already processed this URL claim (" + targetClaim + "), skipping.");
+            return;
+          }
+          LOG.info("Claim from URL detected, proceeding with automation.");
           if (lastFailedClaim !== targetClaim) {
             failureCount = 0;
             lastFailedClaim = "";
@@ -603,6 +625,7 @@
         }
 
         lastSeenKick = kick;
+        urlBasedRun = fromUrl;
         const req = targetReq;
         const claim = targetClaim;
 
@@ -615,7 +638,8 @@
         // copy_only: just log, don't attempt to copy again (portal did it) and don't navigate
         if (runMode === "copy_only") {
           await setSuccessState(req, claim);
-          automationDisabled = true; // Stop interfering after success
+          automationDisabled = true;
+          processedUrlKey = urlReq + "|" + claim;
           LOG.info("✅ SUCCESS (copy_only - no nav)", claim);
           return;
         }
@@ -660,8 +684,9 @@
           // If we've failed 3+ times on the same claim, stop trying
           if (failureCount >= 3) {
             LOG.err("Too many failures for claim:", claim, "- stopping automation for this claim.");
-            await setSuccessState(req, claim); // Mark as "done" to prevent infinite retries
+            await setSuccessState(req, claim);
             automationDisabled = true;
+            processedUrlKey = urlReq + "|" + claim;
             return;
           }
           await sleep(1000);
@@ -688,10 +713,11 @@
 
         // claim_only: stop after results row is present (search completed)
         if (runMode === "claim_only") {
-          failureCount = 0; // Reset on success
+          failureCount = 0;
           lastFailedClaim = "";
           await setSuccessState(req, claim);
-          automationDisabled = true; // Stop interfering after success
+          automationDisabled = true;
+          processedUrlKey = urlReq + "|" + claim;
           LOG.info("✅ SUCCESS (claim_only)", claim);
           return;
         }
@@ -705,19 +731,22 @@
         const ok = isOnLossDetails() || !!(await waitAny(LOSS_DETAILS_SCREENS, WAIT_LOSS_SCREEN_MS));
         if (!ok) { await sleep(800); continue; }
 
-        failureCount = 0; // Reset on success
+        failureCount = 0;
         lastFailedClaim = "";
         await setSuccessState(req, claim);
-        automationDisabled = true; // Stop interfering after success
+        automationDisabled = true;
+        processedUrlKey = urlReq + "|" + claim;
         LOG.info("✅ SUCCESS (full)", claim);
         return;
       }
     } catch (e) {
       LOG.err("CRASH:", e);
-      schedule(1000);
+      if (isContextDead(e)) contextAlive = false;
+      if (contextAlive) schedule(1000);
     } finally {
       running = false;
-      if (hasPendingRun) schedule(100);
+      urlBasedRun = false;
+      if (hasPendingRun && contextAlive) schedule(100);
     }
   }
 
@@ -738,8 +767,16 @@
 
   if (!shouldProcessThisTab()) return;
 
+  // Ask background to close duplicate CC process tabs (handles VBS opening new tabs each time)
+  try {
+    chrome.runtime.sendMessage({ type: "CLAIM_PROCESS_TAB" }, () => {
+      void chrome.runtime.lastError; // Suppress error if background not ready yet
+    });
+  } catch {}
+
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
+      if (!contextAlive) return;
       if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
     });
   } catch (e) {
@@ -748,10 +785,10 @@
 
   // Polling interval - but only if not already running and not disabled
   setInterval(() => {
-    if (!running && !automationDisabled) {
+    if (!running && !automationDisabled && contextAlive) {
       schedule(0);
     }
-  }, 2000); // Increased to 2 seconds to reduce spam
+  }, 2000);
 
   // init settings cache once
   loadRunMode().finally(() => schedule(500));

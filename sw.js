@@ -5,6 +5,13 @@
 const CC_ORIGIN = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net";
 const CC_URL_BASE = `${CC_ORIGIN}/ClaimCenter.do`;
 
+// Track the CC automation tab so we can reuse it even after SPA navigation changes its URL
+let processTabId = null;
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === processTabId) processTabId = null;
+});
+
 const DEBUG = true;
 const log = (...a) => DEBUG && console.log("[SW]", ...a);
 const warn = (...a) => console.warn("[SW]", ...a);
@@ -45,6 +52,18 @@ function isProcessUrl(urlStr) {
 }
 
 async function findExistingProcessTab() {
+  // First: check our stored tab ID (survives SPA URL changes)
+  if (processTabId != null) {
+    try {
+      const stored = await chrome.tabs.get(processTabId);
+      if (stored && stored.url && stored.url.startsWith(CC_ORIGIN)) {
+        return stored;
+      }
+    } catch {
+      processTabId = null; // Tab was closed or doesn't exist
+    }
+  }
+
   const tabs = await chrome.tabs.query({ url: `${CC_ORIGIN}/*` });
 
   // Prefer a tab that already has process=true so we don’t hijack a user’s normal CC tab
@@ -232,9 +251,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       if (!tab) {
         tab = await chrome.tabs.create({ url, active: true });
+        processTabId = tab.id;
         log("created process CC tab", tab.id);
       } else {
         await chrome.tabs.update(tab.id, { url, active: true });
+        processTabId = tab.id;
         log("updated process CC tab", tab.id);
       }
 
@@ -267,6 +288,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         delivered: result.delivered,
         reason: result.reason,
       });
+      return;
+    }
+
+    // ---- Process tab registration (closes duplicate CC process tabs) ----
+    if (msg?.type === "CLAIM_PROCESS_TAB") {
+      const tabId = sender.tab?.id;
+      if (tabId) {
+        const tabs = await chrome.tabs.query({ url: `${CC_ORIGIN}/*` });
+        for (const t of tabs) {
+          if (t.id !== tabId && t.url && isProcessUrl(t.url)) {
+            try { await chrome.tabs.remove(t.id); } catch {}
+          }
+        }
+        processTabId = tabId;
+      }
+      sendResponse({ ok: true });
       return;
     }
 
