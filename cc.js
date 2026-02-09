@@ -333,6 +333,8 @@
   let lastSeenKick = -1;
   let lastRunTime = 0;
   let automationDisabled = false; // Flag to stop interfering after success
+  let failureCount = 0; // Track consecutive failures for same claim
+  let lastFailedClaim = ""; // Track which claim we're failing on
 
   async function getState() {
     try {
@@ -584,8 +586,19 @@
         // When from URL, always allow re-run (user explicitly requested via VBS)
         if (fromUrl) {
           LOG.info("Claim from URL detected, forcing re-run (bypassing already-done check).");
+          // Reset failure count for new URL-based claim
+          if (lastFailedClaim !== targetClaim) {
+            failureCount = 0;
+            lastFailedClaim = "";
+          }
         } else if (alreadyDone && kick === lastSeenKick) {
           LOG.info("Already processed this claim, skipping.");
+          return;
+        }
+        
+        // If we've failed too many times on this claim, don't keep trying
+        if (failureCount >= 3 && lastFailedClaim === targetClaim) {
+          LOG.warn("Skipping - too many failures for this claim:", targetClaim);
           return;
         }
 
@@ -631,23 +644,54 @@
         if (!(await stillOwner(req))) return;
         await waitForNotLoading(9000);
 
-        if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) { await sleep(420); continue; }
+        LOG.info("Attempting to set claim value:", claim);
+        if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) { 
+          LOG.warn("Failed to set claim value, retrying...");
+          await sleep(420); 
+          continue; 
+        }
         if (!(await stillOwner(req))) return;
 
+        LOG.info("Submitting search for claim:", claim);
         if (!(await submitSearchReliable(claim, req))) {
-          LOG.warn("Search failed after retries, stopping to avoid spamming.");
-          return; // Stop instead of continuing to spam
+          LOG.warn("Search failed after retries.");
+          failureCount++;
+          lastFailedClaim = claim;
+          // If we've failed 3+ times on the same claim, stop trying
+          if (failureCount >= 3) {
+            LOG.err("Too many failures for claim:", claim, "- stopping automation for this claim.");
+            await setSuccessState(req, claim); // Mark as "done" to prevent infinite retries
+            automationDisabled = true;
+            return;
+          }
+          await sleep(1000);
+          continue;
+        }
+
+        // Reset failure count on success
+        if (lastFailedClaim !== claim) {
+          failureCount = 0;
+          lastFailedClaim = "";
         }
 
         await setAndLatchClaimValue(claim, { latchMs: 720, req });
         if (!(await stillOwner(req))) return;
 
+        LOG.info("Waiting for search results (row0)...");
         const row0 = await waitSel(ROW0, WAIT_ROW0_MS, { mustBeVisible: true });
-        if (!row0) { await sleep(650); continue; }
+        if (!row0) { 
+          LOG.warn("Row0 not found, retrying...");
+          await sleep(650); 
+          continue; 
+        }
+        LOG.info("Row0 found, search successful!");
 
         // claim_only: stop after results row is present (search completed)
         if (runMode === "claim_only") {
+          failureCount = 0; // Reset on success
+          lastFailedClaim = "";
           await setSuccessState(req, claim);
+          automationDisabled = true; // Stop interfering after success
           LOG.info("✅ SUCCESS (claim_only)", claim);
           return;
         }
@@ -661,6 +705,8 @@
         const ok = isOnLossDetails() || !!(await waitAny(LOSS_DETAILS_SCREENS, WAIT_LOSS_SCREEN_MS));
         if (!ok) { await sleep(800); continue; }
 
+        failureCount = 0; // Reset on success
+        lastFailedClaim = "";
         await setSuccessState(req, claim);
         automationDisabled = true; // Stop interfering after success
         LOG.info("✅ SUCCESS (full)", claim);
@@ -700,7 +746,12 @@
     LOG.err("chrome.storage.onChanged.addListener (local) error:", e);
   }
 
-  setInterval(() => schedule(0), 1000);
+  // Polling interval - but only if not already running and not disabled
+  setInterval(() => {
+    if (!running && !automationDisabled) {
+      schedule(0);
+    }
+  }, 2000); // Increased to 2 seconds to reduce spam
 
   // init settings cache once
   loadRunMode().finally(() => schedule(500));
