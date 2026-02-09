@@ -2,7 +2,7 @@
 //        + RUN MODE SETTINGS: full | claim_only | copy_only)
 
 (() => {
-  const DEBUG = false;
+  const DEBUG = true;
   const LOG = DEBUG
     ? {
       info: (...a) => console.log("[TM]", ...a),
@@ -23,20 +23,25 @@
       const mode = data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
       cachedRunMode = mode;
       return mode;
-    } catch {
+    } catch (e) {
+      LOG.err("loadRunMode error:", e);
       cachedRunMode = DEFAULT_SETTINGS.runMode;
       return cachedRunMode;
     }
   }
 
   // Keep cache fresh if user changes settings while CC tab is open
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "sync") return;
-    if (changes[SETTINGS_KEY]) {
-      const next = changes[SETTINGS_KEY]?.newValue?.runMode;
-      if (next) cachedRunMode = next;
-    }
-  });
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== "sync") return;
+      if (changes[SETTINGS_KEY]) {
+        const next = changes[SETTINGS_KEY]?.newValue?.runMode;
+        if (next) cachedRunMode = next;
+      }
+    });
+  } catch (e) {
+    LOG.err("chrome.storage.onChanged.addListener error:", e);
+  }
 
   // --- Initial Environment Checks ---
   function shouldProcessThisTab() {
@@ -72,12 +77,12 @@
   const WAIT_LOSS_MENU_MS = 18000;
   const WAIT_LOSS_SCREEN_MS = 20000;
   const POST_CLICK_CHECK_MS = 1400;
-  const ROW0_RETRY_COUNT = 28;
-  const ROW0_RETRY_GAP_MS = 85;
+  const ROW0_RETRY_COUNT = 10; // Reduced to prevent excessive spamming
+  const ROW0_RETRY_GAP_MS = 200; // Increased delay between retries
 
   const RESET_TO_SIMPLE_ROUNDS = 25;
   const SEARCH_START_WAIT_MS = 2200;
-  const SEARCH_TRIES = 4;
+  const SEARCH_TRIES = 3; // Reduced attempts
 
   // --- Selectors ---
   const SIMPLE_CLAIM_INPUT =
@@ -327,9 +332,15 @@
   let hasPendingRun = false;
   let lastSeenKick = -1;
   let lastRunTime = 0;
+  let automationDisabled = false; // Flag to stop interfering after success
 
   async function getState() {
-    return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
+    try {
+      return await chrome.storage.local.get(["handoff", "ownerReq", "lastReq", "lastClaim", "kick"]);
+    } catch (e) {
+      LOG.err("getState error:", e);
+      return {};
+    }
   }
 
   async function setSuccessState(req, claim) {
@@ -492,10 +503,38 @@
     hasPendingRun = false;
 
     try {
+      let loopCount = 0;
       while (true) {
+        loopCount++;
+        if (loopCount > 10) {
+          LOG.warn("Too many loops, stopping to prevent spamming.");
+          return;
+        }
         if (Date.now() - lastRunTime > 45000) {
           LOG.warn("Watchdog: Run taking too long, aborting to reset state.");
           return;
+        }
+
+        // If automation is disabled after success, only check for new claims
+        if (automationDisabled) {
+          const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
+          const urlParams = new URLSearchParams(location.search);
+          const urlClaim = urlParams.get("claimNumber") || "";
+          const urlReq = birthReq();
+          let targetClaim = "";
+          let targetReq = "";
+          if (urlClaim) {
+            targetClaim = urlClaim;
+            targetReq = urlReq;
+          } else if (handoff?.claim && handoff?.req === urlReq) {
+            targetClaim = handoff.claim;
+            targetReq = handoff.req;
+          }
+          if (!targetClaim) return;
+          const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
+          if (alreadyDone && kick === lastSeenKick) return;
+          // New claim detected, reset flag
+          automationDisabled = false;
         }
 
         const { handoff, ownerReq, lastReq, lastClaim, kick } = await getState();
@@ -531,7 +570,17 @@
         }
 
         const alreadyDone = (lastReq === targetReq && lastClaim === targetClaim);
-        if (alreadyDone && kick === lastSeenKick) return;
+        LOG.info("Already done check:", alreadyDone, "kick check:", kick === lastSeenKick, "lastReq:", lastReq, "targetReq:", targetReq, "lastClaim:", lastClaim, "targetClaim:", targetClaim);
+
+        // Allow re-running if claim comes from URL (e.g., PaAuto.vbs direct link)
+        const fromUrl = !!urlClaim;
+        if (alreadyDone && kick === lastSeenKick && !fromUrl) {
+          LOG.info("Already processed this claim, skipping.");
+          return;
+        }
+        if (fromUrl) {
+          LOG.info("Claim from URL, allowing re-run.");
+        }
 
         lastSeenKick = kick;
         const req = targetReq;
@@ -546,18 +595,31 @@
         // copy_only: just log, don't attempt to copy again (portal did it) and don't navigate
         if (runMode === "copy_only") {
           await setSuccessState(req, claim);
+          automationDisabled = true; // Stop interfering after success
           LOG.info("✅ SUCCESS (copy_only - no nav)", claim);
           return;
         }
 
+        LOG.info("Proceeding with automation...");
 
+        LOG.info("Waiting for page to stabilize...");
+        await sleep(2000); // Give extra time for page to load
+
+        LOG.info("Checking hasGuidewireUi...");
         if (!hasGuidewireUi()) {
+          LOG.warn("Guidewire UI not detected, sleeping and retrying...");
           await sleep(500);
           continue;
         }
+        LOG.info("Guidewire UI detected, proceeding to ensureOnSimpleSearch...");
 
         const input = await ensureOnSimpleSearch();
-        if (!input) { await sleep(650); continue; }
+        if (!input) {
+          LOG.warn("Failed to ensure on simple search, sleeping and retrying...");
+          await sleep(650);
+          continue;
+        }
+        LOG.info("On simple search screen, proceeding...");
 
         if (!(await stillOwner(req))) return;
         await waitForNotLoading(9000);
@@ -565,7 +627,10 @@
         if (!(await setAndLatchClaimValue(claim, { latchMs: 1250, req }))) { await sleep(420); continue; }
         if (!(await stillOwner(req))) return;
 
-        if (!(await submitSearchReliable(claim, req))) { await sleep(600); continue; }
+        if (!(await submitSearchReliable(claim, req))) {
+          LOG.warn("Search failed after retries, stopping to avoid spamming.");
+          return; // Stop instead of continuing to spam
+        }
 
         await setAndLatchClaimValue(claim, { latchMs: 720, req });
         if (!(await stillOwner(req))) return;
@@ -590,6 +655,7 @@
         if (!ok) { await sleep(800); continue; }
 
         await setSuccessState(req, claim);
+        automationDisabled = true; // Stop interfering after success
         LOG.info("✅ SUCCESS (full)", claim);
         return;
       }
@@ -603,21 +669,29 @@
   }
 
   // --- Triggers ---
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg?.type === "PING_TM") {
-      sendResponse({ ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi() });
-      return;
-    }
-    if (msg?.type === "RUN_NOW" && shouldProcessThisTab()) {
-      schedule(0);
-    }
-  });
+  try {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      if (msg?.type === "PING_TM") {
+        sendResponse({ ok: true, process: shouldProcessThisTab(), ui: hasGuidewireUi() });
+        return;
+      }
+      if (msg?.type === "RUN_NOW" && shouldProcessThisTab()) {
+        schedule(0);
+      }
+    });
+  } catch (e) {
+    LOG.err("chrome.runtime.onMessage.addListener error:", e);
+  }
 
   if (!shouldProcessThisTab()) return;
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
-  });
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
+    });
+  } catch (e) {
+    LOG.err("chrome.storage.onChanged.addListener (local) error:", e);
+  }
 
   setInterval(() => schedule(0), 1000);
 
