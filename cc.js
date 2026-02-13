@@ -155,6 +155,83 @@
     return r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility !== "hidden";
   }
 
+  // New: Wait for Guidewire click overlay to be removed
+  function waitUntilClickable() {
+    return new Promise((resolve) => {
+      const o = document.getElementById("gw-click-overlay");
+      if (!o || !o.classList.contains("gw-disable-click")) return resolve();
+
+      new MutationObserver((m, obs) => {
+        if (!o.classList.contains("gw-disable-click")) {
+          obs.disconnect();
+          resolve();
+        }
+      }).observe(o, { attributes: true, attributeFilter: ["class"] });
+    });
+  }
+
+  // New: Wait for element using MutationObserver (faster than polling)
+  function waitForElm(selector, timeoutMs = 10000) {
+    return new Promise((resolve) => {
+      const existing = document.querySelector(selector);
+      if (existing) return resolve(existing);
+
+      let timeoutId;
+      const observer = new MutationObserver(() => {
+        const el = document.querySelector(selector);
+        if (el) {
+          observer.disconnect();
+          if (timeoutId) clearTimeout(timeoutId);
+          resolve(el);
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      // Add timeout fallback
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        resolve(null);
+      }, timeoutMs);
+    });
+  }
+
+  // New: Wait for element with specific text content
+  async function waitForText(selector, expectedText, timeoutMs = 10000) {
+    const el = await waitForElm(selector, timeoutMs);
+    if (!el) return null;
+
+    if (el.textContent.includes(expectedText)) {
+      return el;
+    }
+
+    return new Promise((resolve) => {
+      let timeoutId;
+      const observer = new MutationObserver(() => {
+        if (el.textContent.includes(expectedText)) {
+          observer.disconnect();
+          if (timeoutId) clearTimeout(timeoutId);
+          resolve(el);
+        }
+      });
+
+      observer.observe(el, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+
+      // Add timeout fallback
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        resolve(null);
+      }, timeoutMs);
+    });
+  }
+
   async function waitSel(selector, timeoutMs, { mustBeVisible = false } = {}) {
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
@@ -224,17 +301,23 @@
   }
 
 
-  async function hardClick(el, label = "") {
+  // Renamed from robustClick to robustClick - now waits for click overlay to clear
+  async function robustClick(el, label = "") {
     if (!el) return false;
+    
+    // Wait for Guidewire click overlay to be removed before clicking
+    await waitUntilClickable();
+    
     try { el.scrollIntoView({ behavior: "auto", block: "center" }); } catch { }
-    try { el.focus(); } catch { }
-
+    
     const rect = el.getBoundingClientRect();
     const cx = Math.floor(rect.left + rect.width / 2);
     const cy = Math.floor(rect.top + rect.height / 2);
-    LOG.click("hardClick", label, { cx, cy });
+    LOG.click("robustClick", label, { cx, cy });
 
     const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: 0, buttons: 1 };
+    
+    try { el.focus(); } catch { }
     try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch { }
     try { el.dispatchEvent(new MouseEvent("mousedown", opts)); } catch { }
     try { el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 })); } catch { }
@@ -242,13 +325,15 @@
     try { el.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 })); } catch { }
     try { el.click(); } catch { }
 
-    try {
-      el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true }));
-      el.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true }));
-    } catch { }
-
     await sleep(35);
     return true;
+  }
+
+  // Simple text insertion (alternative to setInputValueNative)
+  function insertText(str, input = document.activeElement) {
+    if (!input) return;
+    input.value = str.trim();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
   function setInputValueNative(input, value) {
@@ -403,7 +488,7 @@
 
       tab = document.querySelector(SEARCH_TAB_SEL) || document.querySelector(SEARCH_TAB_FALLBACKS[0]);
       if (tab) {
-        await hardClick(tab, "SearchTab");
+        await robustClick(tab, "SearchTab");
         await sleep(150);
         await waitForNotLoading(3000);
       }
@@ -411,7 +496,7 @@
       if (i % 3 === 0) {
         const claimItem = findClaimMenuItem();
         if (claimItem) {
-          await hardClick(claimItem, "MenuItem:Claim");
+          await robustClick(claimItem, "MenuItem:Claim");
           await sleep(250);
           await waitForNotLoading(5000);
         }
@@ -425,10 +510,10 @@
   // --- Automation Steps ---
   async function clickSearchOnce() {
     const outer = document.querySelector(SIMPLE_SEARCH_BTN) || await waitSel(SIMPLE_SEARCH_BTN, 2600);
-    if (outer) await hardClick(outer, "SearchBtn(outer)");
+    if (outer) await robustClick(outer, "SearchBtn(outer)");
 
     const inner = document.querySelector(SIMPLE_SEARCH_BTN_INNER) || await waitSel(SIMPLE_SEARCH_BTN_INNER, 2600);
-    if (inner) await hardClick(inner, "SearchBtn(inner)");
+    if (inner) await robustClick(inner, "SearchBtn(inner)");
   }
 
   async function setAndLatchClaimValue(value, { latchMs = 1100, checkEveryMs = 70, req = null } = {}) {
@@ -484,7 +569,7 @@
       const row0El = document.querySelector(ROW0);
       if (!row0El) return false;
 
-      await hardClick(row0El, "Row0");
+      await robustClick(row0El, "Row0");
       const opened = await waitAny(CLAIM_OPEN_MARKERS, POST_CLICK_CHECK_MS);
       if (opened) return true;
       await sleep(ROW0_RETRY_GAP_MS);
@@ -497,10 +582,10 @@
     const el = await waitAny([LOSS_DETAILS_MENUITEM_SELECTOR, LOSS_DETAILS_MENUITEM_ID_FALLBACK], WAIT_LOSS_MENU_MS, { mustBeVisible: true });
     if (!el) return false;
 
-    await hardClick(el, "LossDetailsMenuItem");
+    await robustClick(el, "LossDetailsMenuItem");
     if (!isOnLossDetails()) {
       await sleep(260);
-      await hardClick(el, "LossDetailsMenuItem(retry)");
+      await robustClick(el, "LossDetailsMenuItem(retry)");
     }
     return true;
   }
