@@ -177,26 +177,106 @@
     }
   }
 
+  // --- Container creation & normalization ---
   function ensureContainer() {
+    // First, check if the full custom section exists
+    let section = document.querySelector("#tm-custom-mainframe-section");
     let c = document.querySelector("#tm-custom-mainframe-buttons");
-    if (c) return c;
 
-    c = document.createElement("div");
-    c.id = "tm-custom-mainframe-buttons";
-    c.style.display = "inline-flex";
-    c.style.alignItems = "center";
-    c.style.gap = "6px";
-    c.style.marginLeft = "6px";
+    if (!section) {
+      // Create the full section if it doesn't exist
+      section = document.createElement("div");
+      section.id = "tm-custom-mainframe-section";
+      section.className = "row top-buffer col-xs-12";
+      section.style.marginTop = "10px";
+      section.innerHTML = `
+        <label class="row paddingleftVI">Custom Scripts</label>
+        <div class="row paddingleftVI">
+          <div class="col-xs-12 top-buffer" id="tm-custom-mainframe-buttons" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-right: 0px;">
+          </div>
+        </div>
+      `;
 
-    const td = document.querySelector("#taskDescription");
-    if (td) {
-      const parent = td.parentElement || td;
-      parent.appendChild(c);
-      return c;
+      // Find the PUUR buttons container to insert after
+      const puurInput = document.querySelector('input[value="LoadPUUR"]');
+      const puurDiv = puurInput ? puurInput.closest('div.row.top-buffer.col-xs-12') : null;
+      if (puurDiv) {
+        puurDiv.parentNode.insertBefore(section, puurDiv.nextSibling);
+      } else {
+        // Fallback: append to body
+        (document.body || document.documentElement).appendChild(section);
+      }
+
+      c = section.querySelector("#tm-custom-mainframe-buttons");
     }
 
-    (document.body || document.documentElement).prepend(c);
+    // If section exists but c doesn't, something wrong, but assume it does
+    if (!c) {
+      c = document.querySelector("#tm-custom-mainframe-buttons");
+      if (!c) {
+        // Last resort
+        c = document.createElement("div");
+        c.id = "tm-custom-mainframe-buttons";
+        (document.body || document.documentElement).appendChild(c);
+      }
+    }
+
+    // Ensure the section has proper spacing
+    section.style.marginBottom = "25px";
+
+    // Apply consistent layout styles
+    c.style.display = "flex";
+    c.style.flexWrap = "wrap";
+    c.style.alignItems = "center";
+    c.style.gap = "8px";
+    c.style.paddingRight = "0";
+
     return c;
+  }
+
+  // Normalize any form wrappers and inline styles inserted by server/markup.
+  function normalizeExistingWrappers(container) {
+    if (!container) return;
+    // Normalize forms (the page may wrap some buttons in forms)
+    const forms = Array.from(container.querySelectorAll("form"));
+    forms.forEach((f) => {
+      // remove inline margins that create uneven spacing
+      f.style.marginRight = "0";
+      f.style.marginBottom = "0";
+      // ensure form uses inline-flex so it participates in container gap properly
+      f.style.display = "inline-flex";
+      f.style.alignItems = "center";
+      f.style.padding = "0";
+      f.style.border = "0";
+      f.style.background = "transparent";
+      // normalize contained button if present
+      const b = f.querySelector("button");
+      if (b) {
+        b.style.margin = "0";
+        b.style.boxSizing = "border-box";
+      }
+    });
+
+    // Normalize any inline margins on direct children (buttons that were added by server)
+    Array.from(container.children).forEach((ch) => {
+      if (ch.tagName && ch.tagName.toLowerCase() !== "form") {
+        if (ch.style) {
+          ch.style.marginRight = "0";
+          ch.style.marginBottom = "0";
+        }
+      }
+    });
+
+    // Ensure consistent button sizing and reset any inline spacing on buttons.
+    const buttons = Array.from(container.querySelectorAll("button"));
+    buttons.forEach((btn) => {
+      // Choose a consistent min width that fits label text but creates an even visual.
+      btn.style.minWidth = btn.style.minWidth || "150px";
+      // if the page already set padding, don't overwrite unless empty
+      btn.style.padding = btn.style.padding || "10px 14px";
+      btn.style.margin = "0 0 5px 0";
+      btn.style.boxSizing = "border-box";
+    });
   }
 
   // --- PA Auto Support ---
@@ -288,41 +368,143 @@
     }
   }
 
+  function createBbsWrapperForPath(filePath) {
+    /* Generates a .bbs wrapper for .vbs scripts to allow auto-execution. */
+    return `Sub Main()
+
+  Dim bzhao
+
+  Set bzhao = CreateObject("BZWhll.WhllObj")
+
+  bzhao.Connect
+
+  bzhao.RunScript "${filePath}"
+
+End Sub`;
+  }
+
+  function baseNameNoExt(path) {
+    return path
+      .split(/[\\/]/) // handle Windows or Unix paths
+      .pop() // get filename
+      .replace(/\.[^.]+$/, ""); // remove last extension
+  }
+
+  function downloadTextFile({ content, downloadName }) {
+    const blob = new Blob([content], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   async function addButton(container) {
     if (!alive) return;
-    if (!container || container.querySelector("#p2ccBtn")) return;
+    if (!container) return;
 
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.id = "p2ccBtn";
+    // Add P2CC button if not already present
+    if (!container.querySelector("#p2ccBtn")) {
+      const form = document.createElement("form");
+      form.action = "javascript:void(0)";
+      form.method = "post";
+      form.style.display = "inline-block";
+      form.style.marginRight = "6px";
+      form.style.marginBottom = "6px";
 
-    const mode = await getRunMode();
-    if (!alive) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "p2ccBtn";
 
-    btn.textContent = getBtnLabel(mode);
-    btn.className = "btn btn-primary-variant btn-mainframe";
-    btn.style.marginLeft = "6px";
+      const mode = await getRunMode();
+      if (!alive) return;
 
-    let cooldown = false;
-    btn.addEventListener(
-      "click",
-      (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (cooldown) return;
-        cooldown = true;
-        setTimeout(() => (cooldown = false), 300);
-        triggerHandoff();
-      },
-      true
-    );
+      btn.textContent = getBtnLabel(mode);
+      btn.className = "btn btn-primary-variant btn-mainframe";
+      btn.style.minWidth = "150px";
+      btn.style.padding = "10px 14px";
+      btn.style.boxSizing = "border-box";
+      btn.style.margin = "0";
 
-    container.appendChild(btn);
+      let cooldown = false;
+      btn.addEventListener(
+        "click",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (cooldown) return;
+          cooldown = true;
+          setTimeout(() => (cooldown = false), 300);
+          triggerHandoff();
+        },
+        true
+      );
+
+      form.addEventListener(
+        "submit",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        },
+        true
+      );
+
+      form.appendChild(btn);
+      container.appendChild(form);
+    }
+
+    // Add the "Check 3rd year" button if not already present
+    if (!container.querySelector("#check3rdYearBtn")) {
+      const form = document.createElement("form");
+      form.action = "javascript:void(0)";
+      form.method = "post";
+      form.style.display = "inline-block";
+      form.style.marginRight = "6px";
+      form.style.marginBottom = "6px";
+
+      const checkBtn = document.createElement("button");
+      checkBtn.type = "button";
+      checkBtn.id = "check3rdYearBtn";
+      checkBtn.textContent = "Check 3rd year";
+      checkBtn.className = "btn btn-primary-variant btn-mainframe";
+      checkBtn.style.minWidth = "150px";
+      checkBtn.style.padding = "10px 14px";
+      checkBtn.style.boxSizing = "border-box";
+      checkBtn.style.margin = "0";
+
+      checkBtn.addEventListener("click", () => {
+        const filePath = "I:\\Apprentice's Scripts\\3-year-loss-scope.vbs";
+        const content = createBbsWrapperForPath(filePath);
+        const downloadName = `${baseNameNoExt(filePath)}.bbs`;
+        downloadTextFile({ content, downloadName });
+      });
+
+      form.addEventListener(
+        "submit",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+        },
+        true
+      );
+
+      form.appendChild(checkBtn);
+      container.appendChild(form);
+    }
+
+
   }
 
   function tryAdd() {
     if (!alive) return;
     const c = ensureContainer();
+    // Normalize any forms / inline styles the page might have added
+    normalizeExistingWrappers(c);
     addButton(c);
     checkPaAutoTriggers();
   }
