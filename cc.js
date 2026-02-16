@@ -939,15 +939,31 @@
       
       await robustClick(claim_search_btn, "SearchBtn");
       
-      // Click on result (exactly like scripts version - waitForText with no timeout)
-      const SSS_RESULT_BUTTON = "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchResultsLV-0-ClaimNumber_button";
-      const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, targetClaim, 0); // No timeout - wait indefinitely
-      if (!result_claim_btn) {
-        LOG.warn("Fast path: Could not find result button");
+      // Wait for search results to appear (wait for results list container first)
+      const RESULTS_LV = "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchResultsLV";
+      const resultsList = await waitForElm(RESULTS_LV, 0); // Wait for results list to appear
+      if (!resultsList) {
+        LOG.warn("Fast path: Results list did not appear");
         return false;
       }
       
-      await robustClick(result_claim_btn, "ResultClaim");
+      // Wait for ROW0 (first result) to appear - this is more reliable than waiting for text
+      const ROW0 = "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchResultsLV-0-ClaimNumber_button";
+      const row0El = await waitForElm(ROW0, 0); // Wait for first result button to appear
+      if (!row0El) {
+        LOG.warn("Fast path: Row0 (first result) did not appear");
+        return false;
+      }
+      
+      // Verify the claim number matches (optional check, but helpful)
+      const row0Text = row0El.textContent || "";
+      if (row0Text.includes(targetClaim)) {
+        LOG.info("Fast path: Found matching claim in row0, clicking...");
+      } else {
+        LOG.info("Fast path: Row0 found but claim number doesn't match, clicking anyway...");
+      }
+      
+      await robustClick(row0El, "ResultClaim");
       
       // Navigate to target page if specified (exactly like scripts version)
       if (targetPage) {
