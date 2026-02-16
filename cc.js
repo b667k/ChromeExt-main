@@ -48,38 +48,33 @@ async function waitForText(selector, expectedText) {
     return el;
   }
 
-  // Wait for text to appear - watch both the element and its parent for changes
+  // Wait for text to appear (exactly like scripts version, but with periodic check as backup)
   return new Promise((resolve) => {
-    const checkText = () => {
+    let resolved = false;
+    
+    const checkAndResolve = () => {
+      if (resolved) return;
       if (el.textContent && el.textContent.includes(expectedText)) {
+        resolved = true;
         observer.disconnect();
+        if (intervalId) clearInterval(intervalId);
         resolve(el);
-        return true;
       }
-      return false;
     };
 
-    // Check immediately in case text was set between element creation and observer setup
-    if (checkText()) return;
+    const observer = new MutationObserver(checkAndResolve);
 
-    const observer = new MutationObserver(() => {
-      checkText();
-    });
-
-    // Observe the element itself and its parent (text might be in child nodes)
     observer.observe(el, {
       childList: true,
       subtree: true,
       characterData: true,
     });
 
-    // Also observe parent in case element gets replaced
-    if (el.parentElement) {
-      observer.observe(el.parentElement, {
-        childList: true,
-        subtree: true,
-      });
-    }
+    // Periodic check as backup (in case MutationObserver misses it)
+    const intervalId = setInterval(checkAndResolve, 100);
+    
+    // Also check immediately in case text was set between element creation and observer setup
+    checkAndResolve();
   });
 }
 
@@ -148,16 +143,10 @@ async function goToSearchScreen() {
   await robustClick(claim_search_btn);
 
   // Wait for search results to load, then click on the resulting claim.
-  // waitForText will wait for both the element AND the text to appear
-  console.log("Waiting for search results with claim:", TARGET_CLAIM);
+  // Use waitForText (exactly like scripts version) - it waits for element AND text
   const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM);
-  if (result_claim_btn) {
-    console.log("Found result button, clicking...");
-    await robustClick(result_claim_btn);
-    console.log("Clicked");
-  } else {
-    console.warn("Result button not found with claim:", TARGET_CLAIM);
-  }
+  await robustClick(result_claim_btn);
+  console.log("Clicked");
 
   //
   // NAVIGATING TO PAGE IN CLAIM.
@@ -186,3 +175,16 @@ async function goToSearchScreen() {
   // Reset URL.
   history.pushState({}, "", window.location.origin + window.location.pathname);
 })();
+
+// Minimal message listener for service worker ping (prevents console errors)
+try {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type === "PING_TM") {
+      sendResponse({ ok: true, process: true });
+      return true;
+    }
+    return false;
+  });
+} catch (e) {
+  // Ignore if extension context is invalidated
+}
