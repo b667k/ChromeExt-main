@@ -124,8 +124,15 @@
     btns.forEach((b) => (b.textContent = txt));
   }
 
+  // Fast: Optimized claim number extraction (matches scripts version approach)
   function getClaimNumberFromTaskDescription() {
     const el = document.querySelector("#taskDescription");
+    // Fast path: try simple split first (scripts version approach)
+    const claimNumber = el?.innerText?.trim()?.split(" ")?.[0]?.trim() || "";
+    if (claimNumber && /^[A-Za-z]\d{11}$/.test(claimNumber)) {
+      return claimNumber;
+    }
+    // Fallback to regex if simple split doesn't work
     const text = el?.innerText?.trim() || "";
     const m = text.match(/\b([A-Za-z]\d{11})\b/);
     return m ? m[1] : "";

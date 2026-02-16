@@ -155,7 +155,7 @@
     return r.width > 0 && r.height > 0 && cs.display !== "none" && cs.visibility !== "hidden";
   }
 
-  // New: Wait for Guidewire click overlay to be removed
+  // Fast: Wait for Guidewire click overlay to be removed (MutationObserver, no polling)
   function waitUntilClickable() {
     return new Promise((resolve) => {
       const o = document.getElementById("gw-click-overlay");
@@ -170,7 +170,7 @@
     });
   }
 
-  // New: Wait for element using MutationObserver (faster than polling)
+  // Fast: Wait for element using MutationObserver (no polling overhead)
   function waitForElm(selector, timeoutMs = 10000) {
     return new Promise((resolve) => {
       const existing = document.querySelector(selector);
@@ -192,14 +192,16 @@
       });
 
       // Add timeout fallback
-      timeoutId = setTimeout(() => {
-        observer.disconnect();
-        resolve(null);
-      }, timeoutMs);
+      if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          observer.disconnect();
+          resolve(null);
+        }, timeoutMs);
+      }
     });
   }
 
-  // New: Wait for element with specific text content
+  // Fast: Wait for element with specific text content using MutationObserver
   async function waitForText(selector, expectedText, timeoutMs = 10000) {
     const el = await waitForElm(selector, timeoutMs);
     if (!el) return null;
@@ -225,29 +227,75 @@
       });
 
       // Add timeout fallback
-      timeoutId = setTimeout(() => {
-        observer.disconnect();
-        resolve(null);
-      }, timeoutMs);
+      if (timeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          observer.disconnect();
+          resolve(null);
+        }, timeoutMs);
+      }
     });
   }
 
+  // Fast: Use MutationObserver-based waitForElm when possible, fallback to polling for visibility checks
   async function waitSel(selector, timeoutMs, { mustBeVisible = false } = {}) {
+    if (!mustBeVisible) {
+      // Fast path: use MutationObserver
+      return await waitForElm(selector, timeoutMs);
+    }
+    // Visibility check requires polling
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       const el = document.querySelector(selector);
-      if (el && (!mustBeVisible || isVisible(el))) return el;
+      if (el && isVisible(el)) return el;
       await sleep(WAIT_STEP_MS);
     }
     return null;
   }
 
   async function waitAny(selectors, timeoutMs, opts) {
+    if (!opts?.mustBeVisible) {
+      // Fast path: check all selectors with MutationObserver
+      for (const s of selectors) {
+        const el = await waitForElm(s, 100); // Quick check
+        if (el) return el;
+      }
+      // If none found quickly, wait for first one
+      return new Promise((resolve) => {
+        let timeoutId;
+        const observers = [];
+        const cleanup = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          observers.forEach(obs => obs.disconnect());
+        };
+        
+        const checkAll = () => {
+          for (const s of selectors) {
+            const el = document.querySelector(s);
+            if (el) {
+              cleanup();
+              return resolve(el);
+            }
+          }
+        };
+        
+        const observer = new MutationObserver(checkAll);
+        observer.observe(document.body, { childList: true, subtree: true });
+        observers.push(observer);
+        
+        if (timeoutMs > 0) {
+          timeoutId = setTimeout(() => {
+            cleanup();
+            resolve(null);
+          }, timeoutMs);
+        }
+      });
+    }
+    // Visibility check requires polling
     const t0 = Date.now();
     while (Date.now() - t0 < timeoutMs) {
       for (const s of selectors) {
         const el = document.querySelector(s);
-        if (el && (!opts?.mustBeVisible || isVisible(el))) return el;
+        if (el && isVisible(el)) return el;
       }
       await sleep(WAIT_STEP_MS);
     }
@@ -301,35 +349,38 @@
   }
 
 
-  // Renamed from robustClick to robustClick - now waits for click overlay to clear
+  // Fast: Optimized click handler (based on scripts version, with logging)
   async function robustClick(el, label = "") {
     if (!el) return false;
     
     // Wait for Guidewire click overlay to be removed before clicking
     await waitUntilClickable();
     
-    try { el.scrollIntoView({ behavior: "auto", block: "center" }); } catch { }
-    
     const rect = el.getBoundingClientRect();
     const cx = Math.floor(rect.left + rect.width / 2);
     const cy = Math.floor(rect.top + rect.height / 2);
     LOG.click("robustClick", label, { cx, cy });
 
-    const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: 0, buttons: 1 };
+    const opts = {
+      bubbles: true,
+      cancelable: true,
+      clientX: cx,
+      clientY: cy,
+    };
     
     try { el.focus(); } catch { }
     try { el.dispatchEvent(new PointerEvent("pointerdown", opts)); } catch { }
     try { el.dispatchEvent(new MouseEvent("mousedown", opts)); } catch { }
-    try { el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 })); } catch { }
-    try { el.dispatchEvent(new MouseEvent("mouseup", { ...opts, buttons: 0 })); } catch { }
-    try { el.dispatchEvent(new MouseEvent("click", { ...opts, buttons: 0 })); } catch { }
+    try { el.dispatchEvent(new PointerEvent("pointerup", opts)); } catch { }
+    try { el.dispatchEvent(new MouseEvent("mouseup", opts)); } catch { }
+    try { el.dispatchEvent(new MouseEvent("click", opts)); } catch { }
     try { el.click(); } catch { }
 
     await sleep(35);
     return true;
   }
 
-  // Simple text insertion (alternative to setInputValueNative)
+  // Fast: Simple text insertion (matches scripts version for speed)
   function insertText(str, input = document.activeElement) {
     if (!input) return;
     input.value = str.trim();
