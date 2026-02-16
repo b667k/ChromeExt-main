@@ -39,26 +39,41 @@ function waitForElm(selector) {
   });
 }
 
-async function waitForText(selector, expectedText) {
-  const el = await waitForElm(selector);
+async function waitForText(selector, expectedText, timeoutMs = 10000) {
+  const checkNow = () => {
+    const el = document.querySelector(selector);
+    if (el && (el.textContent || "").includes(expectedText)) {
+      return el;
+    }
+    return null;
+  };
 
-  if (el.textContent.includes(expectedText)) {
-    return el;
-  }
+  const immediate = checkNow();
+  if (immediate) return immediate;
 
   return new Promise((resolve) => {
+    let timeoutId = null;
     const observer = new MutationObserver(() => {
-      if (el.textContent.includes(expectedText)) {
+      const match = checkNow();
+      if (match) {
         observer.disconnect();
-        resolve(el);
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve(match);
       }
     });
 
-    observer.observe(el, {
+    observer.observe(document.body, {
       childList: true,
       subtree: true,
       characterData: true,
     });
+
+    if (timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        resolve(null);
+      }, timeoutMs);
+    }
   });
 }
 
@@ -129,7 +144,15 @@ async function goToSearchScreen() {
   await robustClick(claim_search_btn);
 
   // Click on the resulting claim.
-  const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM);
+  let result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
+  if (!result_claim_btn) {
+    // First-run fallback: trigger search one more time internally so user doesn't need to click again.
+    await robustClick(claim_search_btn);
+    result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
+  }
+  if (!result_claim_btn) {
+    result_claim_btn = await waitForElm(SSS_RESULT_BUTTON);
+  }
   await robustClick(result_claim_btn);
   console.log("Clicked");
 
