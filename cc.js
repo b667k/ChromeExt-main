@@ -1,6 +1,7 @@
 // cc.js - EXACT COPY OF scripts/claimcenter.js (no changes, just works)
 
 async function robustClick(el) {
+  if (!el) return;
   await waitUntilClickable();
   const rect = el.getBoundingClientRect();
   const cx = Math.floor(rect.left + rect.width / 2);
@@ -87,7 +88,9 @@ async function goToSearchScreen() {
   let el = document.querySelector(SSS_SEARCH_CLAIMS_TITLEBAR);
   if (!el) {
     const SSS_SEARCH_TAB_BTN = "#TabBar-SearchTab div";
-    let search_tab_btn = document.querySelector(SSS_SEARCH_TAB_BTN);
+    let search_tab_btn =
+      document.querySelector(SSS_SEARCH_TAB_BTN) ||
+      (await waitForElm(SSS_SEARCH_TAB_BTN));
     await robustClick(search_tab_btn);
   }
 }
@@ -112,13 +115,6 @@ async function goToSearchScreen() {
   if (!TARGET_CLAIM) {
     return;
   }
-
-  // Prevent running twice on same page load
-  if (window.__cc_automation_run) {
-    console.log("Already ran automation on this page, skipping...");
-    return;
-  }
-  window.__cc_automation_run = true;
 
   // Navigate to the search screen.
   await goToSearchScreen();
@@ -157,7 +153,7 @@ async function goToSearchScreen() {
 
     if (label_text === TARGET_PAGE) {
       console.log("WAS A MATCH.");
-      robustClick(el.children[0]);
+      await robustClick(el.children[0]);
       break;
     }
   }
