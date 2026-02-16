@@ -97,6 +97,18 @@ function insertText(str, input = document.activeElement) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+const SETTINGS_KEY = "settings_v1";
+const DEFAULT_SETTINGS = { runMode: "full" }; // full | claim_only | copy_only
+
+async function getRunMode() {
+  try {
+    const data = await chrome.storage.sync.get(SETTINGS_KEY);
+    return data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
+  } catch {
+    return DEFAULT_SETTINGS.runMode;
+  }
+}
+
 async function goToSearchScreen() {
   const SSS_SEARCH_CLAIMS_TITLEBAR =
     "#SimpleClaimSearch-SimpleClaimSearchScreen-ttlBar";
@@ -131,6 +143,14 @@ async function goToSearchScreen() {
     return;
   }
 
+  const runMode = await getRunMode();
+
+  // copy_only: keep opening ClaimCenter tab, but do not run any CC automation.
+  if (runMode === "copy_only") {
+    history.pushState({}, "", window.location.origin + window.location.pathname);
+    return;
+  }
+
   // Navigate to the search screen.
   await goToSearchScreen();
 
@@ -142,6 +162,12 @@ async function goToSearchScreen() {
   // Click the search button.
   const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN);
   await robustClick(claim_search_btn);
+
+  // claim_only: search claim but do not click row0/result.
+  if (runMode === "claim_only") {
+    history.pushState({}, "", window.location.origin + window.location.pathname);
+    return;
+  }
 
   // Click on the resulting claim.
   let result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
