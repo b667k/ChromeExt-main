@@ -22,7 +22,7 @@
     "default_popup": "popup.html"
   },
 
-"permissions": ["storage", "tabs", "nativeMessaging", "clipboardWrite"],
+  "permissions": ["storage", "tabs", "nativeMessaging", "clipboardWrite"],
   "host_permissions": [
     "http://erieweb/*",
     "https://erieweb/*",
