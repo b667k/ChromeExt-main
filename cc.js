@@ -535,6 +535,7 @@
   let contextAlive = true; // False when extension context is invalidated — stops all loops
   let processedUrlKey = ""; // "tm_t|claimNumber" we already completed (prevents infinite URL re-runs)
   let urlBasedRun = false; // True when current run is URL-triggered (skip stillOwner checks)
+  let fastPathRunning = false; // Prevent fast path from running twice
 
   function isContextDead(e) {
     return e && String(e.message || e).includes("Extension context invalidated");
@@ -713,6 +714,12 @@
   // --- Main Loop ---
   async function runLoop() {
     if (running) { hasPendingRun = true; return; }
+    
+    // If automation is disabled (fast path running), don't run slow path at all
+    if (automationDisabled) {
+      LOG.info("Slow path skipped - automation disabled (fast path running)");
+      return;
+    }
 
     running = true;
     lastRunTime = Date.now();
@@ -732,6 +739,12 @@
         }
 
         if (!contextAlive) return;
+        
+        // Check again if automation was disabled (fast path might have started)
+        if (automationDisabled) {
+          LOG.info("Slow path stopped - automation disabled during execution");
+          return;
+        }
 
         // If automation is disabled after success, only check for genuinely NEW claims
         if (automationDisabled) {
@@ -950,11 +963,21 @@
 
   // --- FAST PATH: Direct execution for URL-based claims (EXACTLY like scripts version) ---
   async function fastPathForUrlClaim() {
+    // Prevent running twice
+    if (fastPathRunning) {
+      LOG.warn("Fast path already running, skipping duplicate");
+      return false;
+    }
+    fastPathRunning = true;
+    
     // Extract URL params (exactly like scripts - uses TargetClaim, not claimNumber)
     const PARAMS = new URLSearchParams(window.location.search);
     const TARGET_CLAIM = PARAMS.get("TargetClaim");
     
-    if (!TARGET_CLAIM) return false; // Not a URL-based claim (scripts version checks this)
+    if (!TARGET_CLAIM) {
+      fastPathRunning = false;
+      return false; // Not a URL-based claim (scripts version checks this)
+    }
     
     LOG.info("🚀 FAST PATH: Starting (matching scripts version exactly)");
     
@@ -1008,9 +1031,11 @@
       // Reset URL (exactly like scripts version)
       history.pushState({}, "", window.location.origin + window.location.pathname);
       LOG.info("✅ FAST PATH SUCCESS");
+      fastPathRunning = false;
       return true;
     } catch (e) {
       LOG.err("Fast path error:", e);
+      fastPathRunning = false;
       return false;
     }
   }
@@ -1023,7 +1048,10 @@
         return;
       }
       if (msg?.type === "RUN_NOW" && shouldProcessThisTab()) {
-        schedule(0);
+        // Don't trigger slow path if automation is disabled (fast path is running)
+        if (!automationDisabled) {
+          schedule(0);
+        }
       }
     });
   } catch (e) {
@@ -1082,6 +1110,8 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (!contextAlive) return;
+      // Don't trigger slow path if automation is disabled (fast path is running)
+      if (automationDisabled) return;
       if (area === "local" && (changes.ownerReq || changes.kick || changes.handoff)) schedule(0);
     });
   } catch (e) {
@@ -1089,13 +1119,17 @@
   }
 
   // Polling interval - but only if not already running and not disabled
-  // Reduced frequency for URL-based claims (they use fast path)
+  // DON'T poll at all if we have a URL claim (fast path handles it, no slow path needed)
   setInterval(() => {
     if (!running && !automationDisabled && contextAlive) {
-      // Check if we have a URL claim - if so, use longer interval (fast path handles it)
+      // Check if we have a URL claim - if so, DON'T schedule slow path at all
       const urlParams = new URLSearchParams(location.search);
-      const hasUrlClaim = !!(urlParams.get("TargetClaim") || urlParams.get("claimNumber"));
-      schedule(hasUrlClaim ? 5000 : 2000); // Less frequent polling for URL claims
+      const hasUrlClaim = !!urlParams.get("TargetClaim");
+      if (hasUrlClaim) {
+        // Fast path handles URL claims, don't poll for slow path
+        return;
+      }
+      schedule(2000);
     }
   }, 2000);
 
