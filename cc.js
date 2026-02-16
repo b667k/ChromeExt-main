@@ -1,4 +1,4 @@
-// cc.js - FAST VERSION (matches scripts/claimcenter.js exactly - no slow path)
+// cc.js - EXACT COPY OF scripts/claimcenter.js (no changes, just works)
 
 async function robustClick(el) {
   await waitUntilClickable();
@@ -39,42 +39,25 @@ function waitForElm(selector) {
 }
 
 async function waitForText(selector, expectedText) {
-  // First wait for the element to exist
   const el = await waitForElm(selector);
-  if (!el) return null;
 
-  // Check if text already matches
-  if (el.textContent && el.textContent.includes(expectedText)) {
+  if (el.textContent.includes(expectedText)) {
     return el;
   }
 
-  // Wait for text to appear (exactly like scripts version, but with periodic check as backup)
   return new Promise((resolve) => {
-    let resolved = false;
-    
-    const checkAndResolve = () => {
-      if (resolved) return;
-      if (el.textContent && el.textContent.includes(expectedText)) {
-        resolved = true;
+    const observer = new MutationObserver(() => {
+      if (el.textContent.includes(expectedText)) {
         observer.disconnect();
-        if (intervalId) clearInterval(intervalId);
         resolve(el);
       }
-    };
-
-    const observer = new MutationObserver(checkAndResolve);
+    });
 
     observer.observe(el, {
       childList: true,
       subtree: true,
       characterData: true,
     });
-
-    // Periodic check as backup (in case MutationObserver misses it)
-    const intervalId = setInterval(checkAndResolve, 100);
-    
-    // Also check immediately in case text was set between element creation and observer setup
-    checkAndResolve();
   });
 }
 
@@ -105,7 +88,7 @@ async function goToSearchScreen() {
   if (!el) {
     const SSS_SEARCH_TAB_BTN = "#TabBar-SearchTab div";
     let search_tab_btn = document.querySelector(SSS_SEARCH_TAB_BTN);
-    if (search_tab_btn) await robustClick(search_tab_btn);
+    await robustClick(search_tab_btn);
   }
 }
 
@@ -124,11 +107,18 @@ async function goToSearchScreen() {
 
   // Extract URL params.
   const PARAMS = new URLSearchParams(window.location.search);
-  const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+  TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
 
   if (!TARGET_CLAIM) {
     return;
   }
+
+  // Prevent running twice on same page load
+  if (window.__cc_automation_run) {
+    console.log("Already ran automation on this page, skipping...");
+    return;
+  }
+  window.__cc_automation_run = true;
 
   // Navigate to the search screen.
   await goToSearchScreen();
@@ -142,8 +132,7 @@ async function goToSearchScreen() {
   const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN);
   await robustClick(claim_search_btn);
 
-  // Wait for search results to load, then click on the resulting claim.
-  // Use waitForText (exactly like scripts version) - it waits for element AND text
+  // Click on the resulting claim.
   const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM);
   await robustClick(result_claim_btn);
   console.log("Clicked");
@@ -152,7 +141,7 @@ async function goToSearchScreen() {
   // NAVIGATING TO PAGE IN CLAIM.
   //
 
-  const TARGET_PAGE = PARAMS.get("TargetPage");
+  TARGET_PAGE = PARAMS.get("TargetPage");
   if (!TARGET_PAGE) {
     // Reset URL.
     history.pushState({}, "", window.location.origin + window.location.pathname);
@@ -161,13 +150,14 @@ async function goToSearchScreen() {
   const CS_MENU_LINKS = "#Claim-MenuLinks";
 
   let menu_links_container = await waitForElm(CS_MENU_LINKS);
+  let t;
   for (const el of menu_links_container.children) {
     let label_text = el.querySelector("div.gw-label")?.innerText.trim();
     console.log(label_text);
 
     if (label_text === TARGET_PAGE) {
       console.log("WAS A MATCH.");
-      await robustClick(el.children[0]);
+      robustClick(el.children[0]);
       break;
     }
   }
@@ -176,7 +166,7 @@ async function goToSearchScreen() {
   history.pushState({}, "", window.location.origin + window.location.pathname);
 })();
 
-// Minimal message listener for service worker ping (prevents console errors)
+// Minimal message listener for service worker
 try {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "PING_TM") {
@@ -185,6 +175,4 @@ try {
     }
     return false;
   });
-} catch (e) {
-  // Ignore if extension context is invalidated
-}
+} catch (e) {}
