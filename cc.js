@@ -39,25 +39,47 @@ function waitForElm(selector) {
 }
 
 async function waitForText(selector, expectedText) {
+  // First wait for the element to exist
   const el = await waitForElm(selector);
+  if (!el) return null;
 
-  if (el.textContent.includes(expectedText)) {
+  // Check if text already matches
+  if (el.textContent && el.textContent.includes(expectedText)) {
     return el;
   }
 
+  // Wait for text to appear - watch both the element and its parent for changes
   return new Promise((resolve) => {
-    const observer = new MutationObserver(() => {
-      if (el.textContent.includes(expectedText)) {
+    const checkText = () => {
+      if (el.textContent && el.textContent.includes(expectedText)) {
         observer.disconnect();
         resolve(el);
+        return true;
       }
+      return false;
+    };
+
+    // Check immediately in case text was set between element creation and observer setup
+    if (checkText()) return;
+
+    const observer = new MutationObserver(() => {
+      checkText();
     });
 
+    // Observe the element itself and its parent (text might be in child nodes)
     observer.observe(el, {
       childList: true,
       subtree: true,
       characterData: true,
     });
+
+    // Also observe parent in case element gets replaced
+    if (el.parentElement) {
+      observer.observe(el.parentElement, {
+        childList: true,
+        subtree: true,
+      });
+    }
   });
 }
 
@@ -125,10 +147,17 @@ async function goToSearchScreen() {
   const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN);
   await robustClick(claim_search_btn);
 
-  // Click on the resulting claim.
+  // Wait for search results to load, then click on the resulting claim.
+  // waitForText will wait for both the element AND the text to appear
+  console.log("Waiting for search results with claim:", TARGET_CLAIM);
   const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM);
-  await robustClick(result_claim_btn);
-  console.log("Clicked");
+  if (result_claim_btn) {
+    console.log("Found result button, clicking...");
+    await robustClick(result_claim_btn);
+    console.log("Clicked");
+  } else {
+    console.warn("Result button not found with claim:", TARGET_CLAIM);
+  }
 
   //
   // NAVIGATING TO PAGE IN CLAIM.
