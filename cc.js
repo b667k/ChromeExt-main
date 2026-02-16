@@ -171,6 +171,7 @@
   }
 
   // Fast: Wait for element using MutationObserver (no polling overhead)
+  // timeoutMs = 0 means wait indefinitely (like scripts version)
   function waitForElm(selector, timeoutMs = 10000) {
     return new Promise((resolve) => {
       const existing = document.querySelector(selector);
@@ -191,17 +192,19 @@
         subtree: true,
       });
 
-      // Add timeout fallback
+      // Add timeout fallback (only if timeoutMs > 0)
       if (timeoutMs > 0) {
         timeoutId = setTimeout(() => {
           observer.disconnect();
           resolve(null);
         }, timeoutMs);
       }
+      // If timeoutMs is 0, wait indefinitely (like scripts version)
     });
   }
 
   // Fast: Wait for element with specific text content using MutationObserver
+  // timeoutMs = 0 means wait indefinitely (like scripts version)
   async function waitForText(selector, expectedText, timeoutMs = 10000) {
     const el = await waitForElm(selector, timeoutMs);
     if (!el) return null;
@@ -226,13 +229,14 @@
         characterData: true,
       });
 
-      // Add timeout fallback
+      // Add timeout fallback (only if timeoutMs > 0)
       if (timeoutMs > 0) {
         timeoutId = setTimeout(() => {
           observer.disconnect();
           resolve(null);
         }, timeoutMs);
       }
+      // If timeoutMs is 0, wait indefinitely (like scripts version)
     });
   }
 
@@ -897,15 +901,15 @@
     
     if (!targetClaim) return false; // Not a URL-based claim
     
-    LOG.info("🚀 FAST PATH: URL-based claim detected, bypassing overhead");
+    LOG.info("🚀 FAST PATH: Starting direct execution (no delays, no polling)");
     
-    // Simple navigation to search screen (like scripts version)
+    // Simple navigation to search screen (exactly like scripts version)
     async function goToSearchScreen() {
       const SSS_SEARCH_CLAIMS_TITLEBAR = "#SimpleClaimSearch-SimpleClaimSearchScreen-ttlBar";
       let el = document.querySelector(SSS_SEARCH_CLAIMS_TITLEBAR);
       if (!el) {
         const SSS_SEARCH_TAB_BTN = "#TabBar-SearchTab div";
-        let search_tab_btn = await waitForElm(SSS_SEARCH_TAB_BTN);
+        let search_tab_btn = await waitForElm(SSS_SEARCH_TAB_BTN, 0); // No timeout - wait indefinitely like scripts
         if (search_tab_btn) await robustClick(search_tab_btn, "SearchTab");
       }
     }
@@ -914,32 +918,41 @@
       // Navigate to search screen
       await goToSearchScreen();
       
-      // Enter claim number
+      // Enter claim number (exactly like scripts version)
       const SSS_CLAIM_INPUT = 'input[name="SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchDV-ClaimNumber"]';
-      const claim_input = await waitForElm(SSS_CLAIM_INPUT);
-      if (!claim_input) return false;
+      const claim_input = await waitForElm(SSS_CLAIM_INPUT, 0); // No timeout - wait indefinitely
+      if (!claim_input) {
+        LOG.warn("Fast path: Could not find claim input");
+        return false;
+      }
       
       await robustClick(claim_input, "ClaimInput");
       insertText(targetClaim);
       
-      // Click search button
+      // Click search button (exactly like scripts version)
       const SSS_CLAIM_SEARCH_BTN = "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchDV-ClaimSearchAndResetInputSet-Search";
-      const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN);
-      if (!claim_search_btn) return false;
+      const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN, 0); // No timeout
+      if (!claim_search_btn) {
+        LOG.warn("Fast path: Could not find search button");
+        return false;
+      }
       
       await robustClick(claim_search_btn, "SearchBtn");
       
-      // Click on result
+      // Click on result (exactly like scripts version - waitForText with no timeout)
       const SSS_RESULT_BUTTON = "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchResultsLV-0-ClaimNumber_button";
-      const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, targetClaim);
-      if (!result_claim_btn) return false;
+      const result_claim_btn = await waitForText(SSS_RESULT_BUTTON, targetClaim, 0); // No timeout - wait indefinitely
+      if (!result_claim_btn) {
+        LOG.warn("Fast path: Could not find result button");
+        return false;
+      }
       
       await robustClick(result_claim_btn, "ResultClaim");
       
-      // Navigate to target page if specified
+      // Navigate to target page if specified (exactly like scripts version)
       if (targetPage) {
         const CS_MENU_LINKS = "#Claim-MenuLinks";
-        let menu_links_container = await waitForElm(CS_MENU_LINKS);
+        let menu_links_container = await waitForElm(CS_MENU_LINKS, 0); // No timeout
         if (menu_links_container) {
           for (const el of menu_links_container.children) {
             let label_text = el.querySelector("div.gw-label")?.innerText.trim();
@@ -951,7 +964,7 @@
         }
       }
       
-      // Reset URL
+      // Reset URL (exactly like scripts version)
       history.pushState({}, "", window.location.origin + window.location.pathname);
       LOG.info("✅ FAST PATH SUCCESS:", targetClaim);
       return true;
@@ -978,24 +991,35 @@
 
   if (!shouldProcessThisTab()) return;
 
-  // Try fast path immediately (for URL-based claims) - runs right away like scripts version
-  (async () => {
-    const success = await fastPathForUrlClaim();
-    if (success) {
-      LOG.info("Fast path completed successfully, skipping slow path");
-      // Mark as processed to prevent slow path from running
-      const urlParams = new URLSearchParams(location.search);
-      const targetClaim = urlParams.get("TargetClaim") || urlParams.get("claimNumber") || "";
-      if (targetClaim) {
-        const urlReq = birthReq();
-        processedUrlKey = urlReq + "|" + targetClaim;
-        automationDisabled = true;
+  // Check for URL-based claim FIRST and disable slow path immediately
+  const urlParams = new URLSearchParams(location.search);
+  const hasUrlClaim = !!(urlParams.get("TargetClaim") || urlParams.get("claimNumber"));
+  
+  if (hasUrlClaim) {
+    // Immediately disable slow path to prevent race condition
+    const targetClaim = urlParams.get("TargetClaim") || urlParams.get("claimNumber") || "";
+    const urlReq = birthReq();
+    processedUrlKey = urlReq + "|" + targetClaim;
+    automationDisabled = true; // Disable slow path immediately
+    
+    LOG.info("🚀 URL-based claim detected, disabling slow path, running fast path only");
+    
+    // Run fast path immediately (like scripts version - no delays, no polling)
+    fastPathForUrlClaim().then((success) => {
+      if (success) {
+        LOG.info("✅ FAST PATH SUCCESS - completed without slow path interference");
+      } else {
+        LOG.warn("Fast path failed, but slow path is disabled. Re-enabling slow path for retry.");
+        // Re-enable slow path only if fast path completely failed
+        automationDisabled = false;
+        processedUrlKey = "";
+        schedule(1000); // Give it a moment then try slow path
       }
-    } else {
-      // Fast path didn't work or not applicable, fall back to slow path
-      LOG.info("Fast path failed or not applicable, using slow path");
-    }
-  })();
+    });
+  } else {
+    // No URL claim, use normal slow path
+    LOG.info("No URL claim detected, using normal slow path");
+  }
 
   // Ask background to close duplicate CC process tabs (handles VBS opening new tabs each time)
   try {
@@ -1025,5 +1049,12 @@
   }, 2000);
 
   // init settings cache once
-  loadRunMode().finally(() => schedule(500));
+  // Only schedule slow path if we don't have a URL claim (fast path handles those)
+  const urlParamsCheck = new URLSearchParams(location.search);
+  const hasUrlClaimCheck = !!(urlParamsCheck.get("TargetClaim") || urlParamsCheck.get("claimNumber"));
+  if (!hasUrlClaimCheck) {
+    loadRunMode().finally(() => schedule(500));
+  } else {
+    loadRunMode(); // Just cache it, don't start slow path
+  }
 })();
