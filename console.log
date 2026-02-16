@@ -1,38 +1,9 @@
-[TM] 🚀 FAST PATH: URL-based claim detected, bypassing overhead
+https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?tm_t=1771206841743-442377&process=true&claimNumber=A00007307222
+
+[TM] 🚀 URL-based claim detected, disabling slow path, running fast path only
+cc.js:8 [TM] 🚀 FAST PATH: Starting direct execution (no delays, no polling)
 cc.js:11 [TM-CLICK] robustClick SearchTab Object
 cc.js:11 [TM-CLICK] robustClick ClaimInput Object
 cc.js:11 [TM-CLICK] robustClick SearchBtn Object
-cc.js:8 [TM] Already done check: false kick check: false fromUrl: true lastReq: 1771205780259-vzmlff targetReq: 1771206015152-0a4f2u lastClaim: A00007303261 targetClaim: A00007307222
-cc.js:8 [TM] Claim from URL detected, proceeding with automation.
-cc.js:8 [TM] RunMode: full Claim: A00007307222
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Attempting to set claim value: A00007307222
-cc.js:8 [TM] Submitting search for claim: A00007307222
-cc.js:11 [TM-CLICK] robustClick SearchBtn(outer) Object
-cc.js:11 [TM-CLICK] robustClick SearchBtn(inner) Object
-cc.js:8 [TM] Waiting for search results (row0)...
-cc.js:8 [TM] Row0 found, search successful!
-cc.js:11 [TM-CLICK] robustClick Row0 Object
-cc.js:8 [TM] Already done check: false kick check: true fromUrl: true lastReq: 1771205780259-vzmlff targetReq: 1771206015152-0a4f2u lastClaim: A00007303261 targetClaim: A00007307222
-cc.js:8 [TM] Claim from URL detected, proceeding with automation.
-cc.js:8 [TM] RunMode: full Claim: A00007307222
-cc.js:8 [TM] Proceeding with automation...
-cc.js:8 [TM] Checking hasGuidewireUi...
-cc.js:8 [TM] Guidewire UI detected, proceeding to ensureOnSimpleSearch...
-cc.js:11 [TM-CLICK] robustClick SearchTab Object
-cc.js:11 [TM-CLICK] robustClick MenuItem:Claim Object
-cc.js:8 [TM] On simple search screen, proceeding...
-cc.js:8 [TM] Attempting to set claim value: A00007307222
-cc.js:8 [TM] Submitting search for claim: A00007307222
-cc.js:11 [TM-CLICK] robustClick SearchBtn(outer) Object
-cc.js:11 [TM-CLICK] robustClick SearchBtn(inner) Object
-cc.js:8 [TM] Waiting for search results (row0)...
-cc.js:8 [TM] Row0 found, search successful!
-cc.js:11 [TM-CLICK] robustClick Row0 Object
-cc.js:11 [TM-CLICK] robustClick LossDetailsMenuItem Object
-cc.js:8 [TM] Fast path failed or not applicable, using slow path
-cc.js:11 [TM-CLICK] robustClick LossDetailsMenuItem(retry) Object
-cc.js:8 [TM] ✅ SUCCESS (full) A00007307222
+
+ok it opens in the correct tab but doesnt click the claim like it types it in but doesnt actully selcect the claim like in my old code i had row0
