@@ -1,6 +1,9 @@
 // sw.js (HARDENED - initial complete check + process-tab targeting + ping-then-run + latest-wins
 //        + RUN MODE short-circuit for copy_only
 //        + FEEDBACK OUTBOX + optional Native Messaging flush)
+//
+// UPDATED: pass TargetPage through ClaimCenter URL (adds &TargetPage=...)
+//          Uses settings_v1.targetPage via getTargetPage()
 
 const CC_ORIGIN = "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net";
 const CC_URL_BASE = `${CC_ORIGIN}/ClaimCenter.do`;
@@ -20,7 +23,7 @@ const warn = (...a) => console.warn("[SW]", ...a);
 // SETTINGS (sync)
 // -----------------------
 const SETTINGS_KEY = "settings_v1";
-const DEFAULT_SETTINGS = { runMode: "full" }; // full | claim_only | copy_only
+const DEFAULT_SETTINGS = { runMode: "full", targetPage: "" }; // full | claim_only | copy_only
 
 async function getRunMode() {
   try {
@@ -31,14 +34,27 @@ async function getRunMode() {
   }
 }
 
+async function getTargetPage() {
+  try {
+    const data = await chrome.storage.sync.get(SETTINGS_KEY);
+    return data?.[SETTINGS_KEY]?.targetPage || DEFAULT_SETTINGS.targetPage;
+  } catch {
+    return DEFAULT_SETTINGS.targetPage;
+  }
+}
+
 // -----------------------
 // CLAIMCENTER AUTOMATION
 // -----------------------
-function buildCcUrl(req, claim) {
+function buildCcUrl(req, claim, targetPage) {
   const u = new URL(CC_URL_BASE);
   u.searchParams.set("tm_t", String(req));
   u.searchParams.set("process", "true");
   if (claim) u.searchParams.set("claimNumber", String(claim));
+
+  // ✅ Add target page for cc.js to consume
+  if (targetPage) u.searchParams.set("TargetPage", String(targetPage));
+
   return u.toString();
 }
 
@@ -83,7 +99,7 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
   try {
     const t = await chrome.tabs.get(tabId);
     if (t?.status === "complete") return true;
-  } catch { }
+  } catch {}
 
   return new Promise((resolve) => {
     let done = false;
@@ -94,7 +110,7 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
       done = true;
       try {
         chrome.tabs.onUpdated.removeListener(onUpd);
-      } catch { }
+      } catch {}
       resolve(ok);
     };
 
@@ -115,7 +131,10 @@ async function waitForTabComplete(tabId, timeoutMs = 25000) {
 
 async function stillLatestReq(req) {
   try {
-    const { ownerReq, handoff } = await chrome.storage.local.get(["ownerReq", "handoff"]);
+    const { ownerReq, handoff } = await chrome.storage.local.get([
+      "ownerReq",
+      "handoff",
+    ]);
     return ownerReq === req && handoff?.req === req;
   } catch {
     return false;
@@ -215,7 +234,11 @@ async function tryBackgroundFlushBestEffort() {
     if (res.sent > 0) log("background flush sent", res.sent);
   } catch (e) {
     // expected if offline or native host not installed
-    if (DEBUG) warn("background flush failed (will retry later)", String(e?.message || e));
+    if (DEBUG)
+      warn(
+        "background flush failed (will retry later)",
+        String(e?.message || e)
+      );
   }
 }
 
@@ -230,22 +253,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Copy happens in popup.js in a user-gesture context.
       // we allow copy_only to proceed so it opens the tab, but cc.js will halt.
 
-
       const req = msg.req;
+
       let claim = "";
       try {
         const data = await chrome.storage.local.get("handoff");
         if (data?.handoff?.req === req) {
           claim = data.handoff.claim;
         }
-      } catch { }
+      } catch {}
 
-      const url = buildCcUrl(req, claim);
+      // ✅ Pull target page from sync settings and pass through URL
+      const targetPage = await getTargetPage();
+
+      const url = buildCcUrl(req, claim, targetPage);
 
       // Optionally re-assert ownerReq to reduce race windows
       try {
         await chrome.storage.local.set({ ownerReq: req });
-      } catch { }
+      } catch {}
 
       let tab = await findExistingProcessTab();
 
@@ -266,7 +292,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Latest-wins: don’t run stale req
       if (!(await stillLatestReq(req))) {
         log("Skipping stale req (newer request exists)", { req });
-        sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+        sendResponse({
+          ok: true,
+          tabId: tab.id,
+          skipped: true,
+          completed,
+          delivered: false,
+        });
         return;
       }
 
@@ -276,7 +308,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Re-check latest-wins after delivery attempts
       if (!(await stillLatestReq(req))) {
         log("Delivery finished but req no longer latest", { req });
-        sendResponse({ ok: true, tabId: tab.id, skipped: true, completed, delivered: false });
+        sendResponse({
+          ok: true,
+          tabId: tab.id,
+          skipped: true,
+          completed,
+          delivered: false,
+        });
         return;
       }
 
@@ -298,7 +336,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const tabs = await chrome.tabs.query({ url: `${CC_ORIGIN}/*` });
         for (const t of tabs) {
           if (t.id !== tabId && t.url && isProcessUrl(t.url)) {
-            try { await chrome.tabs.remove(t.id); } catch {}
+            try {
+              await chrome.tabs.remove(t.id);
+            } catch {}
           }
         }
         processTabId = tabId;
@@ -323,7 +363,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, queued: count, flushed: true });
       } catch (e) {
         // Keep in outbox for retry
-        sendResponse({ ok: true, queued: count, flushed: false, error: String(e?.message || e) });
+        sendResponse({
+          ok: true,
+          queued: count,
+          flushed: false,
+          error: String(e?.message || e),
+        });
       }
       return;
     }

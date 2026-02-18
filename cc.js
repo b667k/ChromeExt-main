@@ -1,4 +1,4 @@
-// cc.js - EXACT COPY OF scripts/claimcenter.js (no changes, just works)
+// cc.js - UPDATED: robust TargetPage matching (case/spacing/underscore tolerant)
 
 async function robustClick(el) {
   if (!el) return;
@@ -26,7 +26,7 @@ function waitForElm(selector) {
     if (document.querySelector(selector)) {
       return resolve(document.querySelector(selector));
     }
-    const observer = new MutationObserver((mutations) => {
+    const observer = new MutationObserver(() => {
       if (document.querySelector(selector)) {
         observer.disconnect();
         resolve(document.querySelector(selector));
@@ -93,7 +93,7 @@ function waitUntilClickable() {
 
 function insertText(str, input = document.activeElement) {
   if (!input) return;
-  input.value = str.trim();
+  input.value = String(str || "").trim();
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -122,6 +122,16 @@ async function goToSearchScreen() {
   }
 }
 
+// Normalize strings so URL params like "loss details" or "loss_details"
+// match UI labels like "Loss Details".
+function normalizeLabel(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ");
+}
+
 (async () => {
   //
   // NAVIGATING TO CLAIM.
@@ -137,11 +147,9 @@ async function goToSearchScreen() {
 
   // Extract URL params.
   const PARAMS = new URLSearchParams(window.location.search);
-  TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+  const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
 
-  if (!TARGET_CLAIM) {
-    return;
-  }
+  if (!TARGET_CLAIM) return;
 
   const runMode = await getRunMode();
 
@@ -170,7 +178,11 @@ async function goToSearchScreen() {
   }
 
   // Click on the resulting claim.
-  let result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
+  let result_claim_btn = await waitForText(
+    SSS_RESULT_BUTTON,
+    TARGET_CLAIM,
+    6000
+  );
   if (!result_claim_btn) {
     // First-run fallback: trigger search one more time internally so user doesn't need to click again.
     await robustClick(claim_search_btn);
@@ -180,35 +192,54 @@ async function goToSearchScreen() {
     result_claim_btn = await waitForElm(SSS_RESULT_BUTTON);
   }
   await robustClick(result_claim_btn);
-  console.log("Clicked");
 
   //
   // NAVIGATING TO PAGE IN CLAIM.
   //
 
-  TARGET_PAGE = PARAMS.get("TargetPage");
-  if (!TARGET_PAGE) {
+  const TARGET_PAGE_RAW = PARAMS.get("TargetPage");
+  if (!TARGET_PAGE_RAW) {
     // Reset URL.
     history.pushState({}, "", window.location.origin + window.location.pathname);
     return;
   }
+
+  const desired = normalizeLabel(TARGET_PAGE_RAW);
   const CS_MENU_LINKS = "#Claim-MenuLinks";
+  const menu_links_container = await waitForElm(CS_MENU_LINKS);
 
-  let menu_links_container = await waitForElm(CS_MENU_LINKS);
-  let t;
-  for (const el of menu_links_container.children) {
-    let label_text = el.querySelector("div.gw-label")?.innerText.trim();
-    console.log(label_text);
+  // Find all labels under the menu container, match by normalized text
+  const labels = Array.from(
+    menu_links_container.querySelectorAll("div.gw-label")
+  );
 
-    if (label_text === TARGET_PAGE) {
-      console.log("WAS A MATCH.");
-      await robustClick(el.children[0]);
+  let clicked = false;
+  for (const lbl of labels) {
+    const labelText = normalizeLabel(lbl?.innerText);
+    if (!labelText) continue;
+
+    if (labelText === desired) {
+      // Click nearest meaningful clickable wrapper
+      const clickable =
+        lbl.closest('a, button, [role="menuitem"]') ||
+        lbl.closest("li") ||
+        lbl.parentElement;
+
+      if (clickable) {
+        await robustClick(clickable);
+        clicked = true;
+      }
       break;
     }
   }
 
-  // Reset URL.
+  // Reset URL (always)
   history.pushState({}, "", window.location.origin + window.location.pathname);
+
+  // Optional debug
+  if (!clicked) {
+    console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW);
+  }
 })();
 
 // Minimal message listener for service worker

@@ -3,8 +3,6 @@
   const DEBUG = false;
   const log = (...a) => DEBUG && console.log("[P2CC]", ...a);
 
-  // --- Detect whether we're in a REAL extension context (content script) ---
-  // Note: window.chrome can exist on pages, but extension APIs (runtime.id + storage) won't.
   const hasExtApi =
     typeof chrome !== "undefined" &&
     !!chrome?.runtime?.id &&
@@ -12,7 +10,6 @@
     typeof chrome?.storage?.local?.get === "function" &&
     typeof chrome?.storage?.local?.set === "function";
 
-  // If you want to *require* extension context, flip this to true and we will exit early.
   const REQUIRE_EXTENSION_CONTEXT = false;
 
   if (REQUIRE_EXTENSION_CONTEXT && !hasExtApi) {
@@ -20,32 +17,38 @@
     return;
   }
 
-  // ---- Suppress the common teardown rejection noise ----
   window.addEventListener("unhandledrejection", (e) => {
     const msg = String(e?.reason?.message || e?.reason || "");
-    if (msg.includes("Extension context invalidated")) {
-      e.preventDefault();
-    }
+    if (msg.includes("Extension context invalidated")) e.preventDefault();
   });
 
-  // Mark content script as "alive" until navigation/unload
   let alive = true;
   const kill = () => (alive = false);
   window.addEventListener("pagehide", kill, { once: true });
   window.addEventListener("beforeunload", kill, { once: true });
 
-  // --- Settings ---
   const SETTINGS_KEY = "settings_v1";
-  const DEFAULT_SETTINGS = { runMode: "full" };
+  const DEFAULT_SETTINGS = {
+    runMode: "full",
+    buttons: { p2cc: true, thirdYear: true },
+  };
 
-  // ---- Safe extension API wrappers (no-ops if not in extension context) ----
+  function normalizeSettings(raw) {
+    const runMode = raw?.runMode || DEFAULT_SETTINGS.runMode;
+    const b = raw?.buttons || {};
+    return {
+      runMode,
+      buttons: {
+        p2cc: typeof b.p2cc === "boolean" ? b.p2cc : DEFAULT_SETTINGS.buttons.p2cc,
+        thirdYear: typeof b.thirdYear === "boolean" ? b.thirdYear : DEFAULT_SETTINGS.buttons.thirdYear,
+      },
+    };
+  }
+
   function safeSyncGet(key) {
     return new Promise((resolve) => {
       try {
-        if (!alive) return resolve(null);
-        if (!hasExtApi) return resolve(null);
-        if (!chrome?.storage?.sync?.get) return resolve(null);
-
+        if (!alive || !hasExtApi || !chrome?.storage?.sync?.get) return resolve(null);
         chrome.storage.sync.get(key, (data) => {
           if (!alive) return resolve(null);
           if (chrome?.runtime?.lastError) return resolve(null);
@@ -60,10 +63,7 @@
   function safeLocalGet(keys) {
     return new Promise((resolve) => {
       try {
-        if (!alive) return resolve(null);
-        if (!hasExtApi) return resolve(null);
-        if (!chrome?.storage?.local?.get) return resolve(null);
-
+        if (!alive || !hasExtApi || !chrome?.storage?.local?.get) return resolve(null);
         chrome.storage.local.get(keys, (data) => {
           if (!alive) return resolve(null);
           if (chrome?.runtime?.lastError) return resolve(null);
@@ -78,10 +78,7 @@
   function safeLocalSet(obj) {
     return new Promise((resolve) => {
       try {
-        if (!alive) return resolve(false);
-        if (!hasExtApi) return resolve(false);
-        if (!chrome?.storage?.local?.set) return resolve(false);
-
+        if (!alive || !hasExtApi || !chrome?.storage?.local?.set) return resolve(false);
         chrome.storage.local.set(obj, () => {
           if (!alive) return resolve(false);
           if (chrome?.runtime?.lastError) return resolve(false);
@@ -95,9 +92,7 @@
 
   function safeSendMessage(msg) {
     try {
-      if (!alive) return false;
-      if (!hasExtApi) return false;
-      if (!chrome?.runtime?.sendMessage) return false;
+      if (!alive || !hasExtApi || !chrome?.runtime?.sendMessage) return false;
       chrome.runtime.sendMessage(msg, () => {});
       return true;
     } catch {
@@ -105,34 +100,40 @@
     }
   }
 
-  async function getRunMode() {
-    // If not extension context, fall back to full mode so UI still works.
-    if (!hasExtApi) return DEFAULT_SETTINGS.runMode;
+  async function getSettings() {
+    if (!hasExtApi) return { ...DEFAULT_SETTINGS };
     const data = await safeSyncGet(SETTINGS_KEY);
-    return data?.[SETTINGS_KEY]?.runMode || DEFAULT_SETTINGS.runMode;
+    return normalizeSettings(data?.[SETTINGS_KEY] || null);
   }
 
   function getBtnLabel(mode) {
     if (mode === "copy_only") return "Copy Claim #";
-    if (mode === "claim_only") return "Search ECC (Stops at Claim)";
-    return "Search ECC (Full)";
+    if (mode === "claim_only") return "Copy & Paste Claim";
+    return "Open Claim in ECC";
   }
 
   function updateButtonLabels(mode) {
-    const btns = document.querySelectorAll("#p2ccBtn");
-    const txt = getBtnLabel(mode);
-    btns.forEach((b) => (b.textContent = txt));
+    document.querySelectorAll("#p2ccBtn").forEach((b) => (b.textContent = getBtnLabel(mode)));
   }
 
-  // Fast: Optimized claim number extraction (matches scripts version approach)
+  function removeButtonById(buttonId) {
+    const btn = document.querySelector(`#${buttonId}`);
+    if (!btn) return;
+    const form = btn.closest("form");
+    if (form?.parentNode) form.parentNode.removeChild(form);
+    else if (btn.parentNode) btn.parentNode.removeChild(btn);
+  }
+
+  function setSectionVisibility(anyEnabled) {
+    const section = document.querySelector("#tm-custom-mainframe-section");
+    if (!section) return;
+    section.style.display = anyEnabled ? "" : "none";
+  }
+
   function getClaimNumberFromTaskDescription() {
     const el = document.querySelector("#taskDescription");
-    // Fast path: try simple split first (scripts version approach)
     const claimNumber = el?.innerText?.trim()?.split(" ")?.[0]?.trim() || "";
-    if (claimNumber && /^[A-Za-z]\d{11}$/.test(claimNumber)) {
-      return claimNumber;
-    }
-    // Fallback to regex if simple split doesn't work
+    if (claimNumber && /^[A-Za-z]\d{11}$/.test(claimNumber)) return claimNumber;
     const text = el?.innerText?.trim() || "";
     const m = text.match(/\b([A-Za-z]\d{11})\b/);
     return m ? m[1] : "";
@@ -151,13 +152,12 @@
     return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  // Helper for mixed contexts (HTTP/HTTPS)
   async function copyToClipboard(text) {
     const value = String(text || "").trim();
     if (!value) return false;
 
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(value);
         return true;
       }
@@ -184,14 +184,11 @@
     }
   }
 
-  // --- Container creation & normalization ---
   function ensureContainer() {
-    // First, check if the full custom section exists
     let section = document.querySelector("#tm-custom-mainframe-section");
     let c = document.querySelector("#tm-custom-mainframe-buttons");
 
     if (!section) {
-      // Create the full section if it doesn't exist
       section = document.createElement("div");
       section.id = "tm-custom-mainframe-section";
       section.className = "row top-buffer col-xs-12";
@@ -204,34 +201,24 @@
         </div>
       `;
 
-      // Find the PUUR buttons container to insert after
       const puurInput = document.querySelector('input[value="LoadPUUR"]');
-      const puurDiv = puurInput ? puurInput.closest('div.row.top-buffer.col-xs-12') : null;
-      if (puurDiv) {
-        puurDiv.parentNode.insertBefore(section, puurDiv.nextSibling);
-      } else {
-        // Fallback: append to body
-        (document.body || document.documentElement).appendChild(section);
-      }
+      const puurDiv = puurInput ? puurInput.closest("div.row.top-buffer.col-xs-12") : null;
+      if (puurDiv) puurDiv.parentNode.insertBefore(section, puurDiv.nextSibling);
+      else (document.body || document.documentElement).appendChild(section);
 
       c = section.querySelector("#tm-custom-mainframe-buttons");
     }
 
-    // If section exists but c doesn't, something wrong, but assume it does
     if (!c) {
       c = document.querySelector("#tm-custom-mainframe-buttons");
       if (!c) {
-        // Last resort
         c = document.createElement("div");
         c.id = "tm-custom-mainframe-buttons";
         (document.body || document.documentElement).appendChild(c);
       }
     }
 
-    // Ensure the section has proper spacing
     section.style.marginBottom = "25px";
-
-    // Apply consistent layout styles
     c.style.display = "flex";
     c.style.flexWrap = "wrap";
     c.style.alignItems = "center";
@@ -241,22 +228,17 @@
     return c;
   }
 
-  // Normalize any form wrappers and inline styles inserted by server/markup.
   function normalizeExistingWrappers(container) {
     if (!container) return;
-    // Normalize forms (the page may wrap some buttons in forms)
-    const forms = Array.from(container.querySelectorAll("form"));
-    forms.forEach((f) => {
-      // remove inline margins that create uneven spacing
+
+    Array.from(container.querySelectorAll("form")).forEach((f) => {
       f.style.marginRight = "0";
       f.style.marginBottom = "0";
-      // ensure form uses inline-flex so it participates in container gap properly
       f.style.display = "inline-flex";
       f.style.alignItems = "center";
       f.style.padding = "0";
       f.style.border = "0";
       f.style.background = "transparent";
-      // normalize contained button if present
       const b = f.querySelector("button");
       if (b) {
         b.style.margin = "0";
@@ -264,7 +246,6 @@
       }
     });
 
-    // Normalize any inline margins on direct children (buttons that were added by server)
     Array.from(container.children).forEach((ch) => {
       if (ch.tagName && ch.tagName.toLowerCase() !== "form") {
         if (ch.style) {
@@ -274,27 +255,20 @@
       }
     });
 
-    // Ensure consistent button sizing and reset any inline spacing on buttons.
-    const buttons = Array.from(container.querySelectorAll("button"));
-    buttons.forEach((btn) => {
-      // Choose a consistent min width that fits label text but creates an even visual.
+    Array.from(container.querySelectorAll("button")).forEach((btn) => {
       btn.style.minWidth = btn.style.minWidth || "150px";
-      // if the page already set padding, don't overwrite unless empty
       btn.style.padding = btn.style.padding || "10px 14px";
       btn.style.margin = "0 0 5px 0";
       btn.style.boxSizing = "border-box";
     });
   }
 
-  // --- PA Auto Support ---
   let lastPromptedClaim = "";
 
   function getDriverStatusFromTaskDescription() {
     const td = document.querySelector("#taskDescription");
     const text = td?.innerText || "";
-    if (/\bDD\b/.test(text) || /Default Driver/i.test(text) || /Unknown Driver/i.test(text)) {
-      return "DD";
-    }
+    if (/\bDD\b/.test(text) || /Default Driver/i.test(text) || /Unknown Driver/i.test(text)) return "DD";
     return "";
   }
 
@@ -308,10 +282,9 @@
         return;
       }
 
-      const mode = await getRunMode();
+      const { runMode: mode } = await getSettings();
       if (!alive) return;
 
-      // Always allow copy mode, even without extension context
       if (mode === "copy_only" || !hasExtApi) {
         const success = await copyToClipboard(claim);
         if (success) {
@@ -326,13 +299,10 @@
         }
       }
 
-      // If we don't have extension APIs, we cannot write extension storage or message background.
-      // (We already copied the claim above, which is still useful.)
       if (!hasExtApi) return;
 
       const req = uniqueReq();
       const policy = getPolicyNumberFromTaskDescription();
-
       const res = await safeLocalGet(["kick"]);
       if (!alive) return;
 
@@ -345,7 +315,6 @@
       });
 
       if (!alive) return;
-
       safeSendMessage({ type: "OPEN_CC", req });
     } catch {
       return;
@@ -376,7 +345,6 @@
   }
 
   function createBbsWrapperForPath(filePath) {
-    /* Generates a .bbs wrapper for .vbs scripts to allow auto-execution. */
     return `Sub Main()
 
   Dim bzhao
@@ -391,10 +359,7 @@ End Sub`;
   }
 
   function baseNameNoExt(path) {
-    return path
-      .split(/[\\/]/) // handle Windows or Unix paths
-      .pop() // get filename
-      .replace(/\.[^.]+$/, ""); // remove last extension
+    return path.split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   }
 
   function downloadTextFile({ content, downloadName }) {
@@ -409,12 +374,23 @@ End Sub`;
     URL.revokeObjectURL(url);
   }
 
-  async function addButton(container) {
-    if (!alive) return;
-    if (!container) return;
+  async function addButtons(container) {
+    if (!alive || !container) return;
 
-    // Add P2CC button if not already present
-    if (!container.querySelector("#p2ccBtn")) {
+    const settings = await getSettings();
+    if (!alive) return;
+
+    const mode = settings.runMode || DEFAULT_SETTINGS.runMode;
+    const showP2cc = !!settings.buttons?.p2cc;
+    const show3rd = !!settings.buttons?.thirdYear;
+    const anyEnabled = showP2cc || show3rd;
+
+    setSectionVisibility(anyEnabled);
+
+    if (!showP2cc) removeButtonById("p2ccBtn");
+    if (!show3rd) removeButtonById("check3rdYearBtn");
+
+    if (showP2cc && !container.querySelector("#p2ccBtn")) {
       const form = document.createElement("form");
       form.action = "javascript:void(0)";
       form.method = "post";
@@ -425,10 +401,6 @@ End Sub`;
       const btn = document.createElement("button");
       btn.type = "button";
       btn.id = "p2ccBtn";
-
-      const mode = await getRunMode();
-      if (!alive) return;
-
       btn.textContent = getBtnLabel(mode);
       btn.className = "btn btn-primary-variant btn-mainframe";
       btn.style.minWidth = "150px";
@@ -462,10 +434,11 @@ End Sub`;
 
       form.appendChild(btn);
       container.appendChild(form);
+    } else if (showP2cc) {
+      updateButtonLabels(mode);
     }
 
-    // Add the "Check 3rd year" button if not already present
-    if (!container.querySelector("#check3rdYearBtn")) {
+    if (show3rd && !container.querySelector("#check3rdYearBtn")) {
       const form = document.createElement("form");
       form.action = "javascript:void(0)";
       form.method = "post";
@@ -503,35 +476,49 @@ End Sub`;
       form.appendChild(checkBtn);
       container.appendChild(form);
     }
-
-
   }
 
   function tryAdd() {
     if (!alive) return;
     const c = ensureContainer();
-    // Normalize any forms / inline styles the page might have added
     normalizeExistingWrappers(c);
-    addButton(c);
+    addButtons(c);
     checkPaAutoTriggers();
   }
 
-  // --- Init ---
-
-  // Only attach storage listener if actually in extension context
+  // ✅ Live updates without reload:
+  // 1) Storage changes
   try {
     if (hasExtApi && chrome?.storage?.onChanged?.addListener) {
       chrome.storage.onChanged.addListener((changes, area) => {
         if (!alive) return;
         if (area === "sync" && changes[SETTINGS_KEY]) {
-          const newMode = changes[SETTINGS_KEY].newValue?.runMode || DEFAULT_SETTINGS.runMode;
-          updateButtonLabels(newMode);
+          tryAdd();
         }
       });
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
+
+  // 2) Direct message from popup (immediate)
+  try {
+    if (hasExtApi && chrome?.runtime?.onMessage?.addListener) {
+      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        if (!alive) return false;
+        if (msg?.type === "P2CC_SETTINGS_UPDATED") {
+          // Ensure async operations complete before returning
+          (async () => {
+            try {
+              await tryAdd();
+            } catch (e) {
+              log("Error in tryAdd from message:", e);
+            }
+          })();
+          return true; // Keep message channel open for async response
+        }
+        return false;
+      });
+    }
+  } catch {}
 
   tryAdd();
 

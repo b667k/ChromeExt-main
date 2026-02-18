@@ -1,0 +1,394 @@
+:root {
+  --bg: #0b2f45;                 /* darker ERIE navy */
+  --card: #10384f;
+  --card2: rgba(255, 255, 255, .03);
+  --text: #e6f1f7;
+  --muted: #9fb8c9;
+  --border: rgba(255, 255, 255, .08);
+  --border2: rgba(255, 255, 255, .12);
+
+  --accent: #176a95;             /* muted ERIE blue */
+  --accent2: #14587c;            /* deeper shade */
+
+  --ok: #22c55e;
+  --danger: #ef4444;
+
+  --shadow: 0 12px 28px rgba(0, 0, 0, .55);
+  --radius: 16px;
+  --radius2: 14px;
+
+  --focus: 0 0 0 3px rgba(23, 106, 149, .25);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 392px;
+  padding: 12px;
+  font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* Header */
+.header {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: #0f3449;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, .08);
+}
+
+.mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.titleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: .2px;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.byline {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.pill {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border2);
+  color: var(--text);
+  background: rgba(255, 255, 255, .04);
+}
+
+/* Content */
+.content { padding: 12px; }
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 950;
+  margin: 2px 0 6px;
+}
+
+.sectionHint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Radio Cards */
+.optionGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.radioCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--radius2);
+  border: 1px solid var(--border);
+  background: #0f3449;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.radioCard:hover { border-color: rgba(255, 255, 255, .15); }
+
+.radioCard input {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.radioTitle { margin: 0; font-weight: 950; }
+
+.radioDesc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.radioCard:has(input:checked) {
+  border-color: var(--accent);
+  background: #123c55;
+}
+
+/* Footer */
+.footer {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: #0f3449;
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.footer strong { color: var(--text); }
+
+/* sr-only */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Target page spacing */
+#targetPageRow { margin-top: 12px; }
+
+/* Select styling */
+select#targetPage {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .10);
+  background-color: #0f3449;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease, transform .15s ease;
+
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  padding-right: 42px;
+
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%23e6f1f7' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 12px 8px;
+
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+select#targetPage:hover {
+  border-color: rgba(255, 255, 255, .18);
+  background-color: #10384f; /* don't use background shorthand */
+  transform: translateY(-1px);
+}
+
+select#targetPage:focus {
+  outline: none;
+  border-color: var(--accent);
+  background-color: #123c55; /* don't use background shorthand */
+  box-shadow:
+    var(--focus),
+    inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+select#targetPage:disabled { opacity: .6; cursor: not-allowed; }
+
+select#targetPage optgroup { color: var(--muted); font-weight: 800; }
+
+select#targetPage option:checked { background-color: var(--accent); color: #ffffff; }
+
+/* =========================================================
+   NEW: Tabs (CSS-only, no JS required)
+   ========================================================= */
+
+.tabs { display: block; }
+
+.tabRadio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tabBar {
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, .03);
+  border-radius: 14px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 9px 10px;
+  border-radius: 12px;
+  font-weight: 900;
+  letter-spacing: .2px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+  border: 1px solid transparent;
+}
+
+#tab_main:checked ~ .tabBar label[for="tab_main"],
+#tab_settings:checked ~ .tabBar label[for="tab_settings"] {
+  color: var(--text);
+  background: #0f3449;
+  border-color: rgba(255, 255, 255, .10);
+}
+
+.tabPanels { display: block; }
+
+.tabPanel { display: none; }
+
+/* show the correct panel */
+#tab_main:checked ~ .tabPanels #panelMain { display: block; }
+#tab_settings:checked ~ .tabPanels #panelSettingsTab { display: block; }
+
+/* =========================================================
+   NEW: Settings Toggle UI (visual only)
+   ========================================================= */
+
+.settingsGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settingsSubTitle {
+  font-size: 12px;
+  font-weight: 950;
+  color: var(--text);
+  margin: 2px 0 2px;
+}
+
+.toggleCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--radius2);
+  border: 1px solid var(--border);
+  background: #0f3449;
+}
+
+.toggleText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.toggleTitle {
+  font-weight: 950;
+  margin: 0;
+}
+
+.toggleDesc {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* Switch */
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 44px;
+  height: 26px;
+  flex: 0 0 auto;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(255, 255, 255, .12);
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.slider:before {
+  content: "";
+  position: absolute;
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .90);
+  box-shadow: 0 6px 14px rgba(0,0,0,.35);
+  transition: transform .15s ease;
+}
+
+.switch input:checked + .slider {
+  background: rgba(23, 106, 149, .65);
+  border-color: rgba(23, 106, 149, .9);
+  box-shadow: 0 0 0 3px rgba(23, 106, 149, .18);
+}
+
+.switch input:checked + .slider:before {
+  transform: translate(18px, -50%);
+}
+
+/* Keyboard focus */
+.switch input:focus + .slider {
+  box-shadow: var(--focus);
+}
