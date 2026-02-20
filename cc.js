@@ -205,20 +205,29 @@ function normalizeLabel(s) {
   }
 
   const desired = normalizeLabel(TARGET_PAGE_RAW);
+  const desiredWords = desired.split(" ").filter(w => w.length > 0);
   const CS_MENU_LINKS = "#Claim-MenuLinks";
   const menu_links_container = await waitForElm(CS_MENU_LINKS);
 
-  // Find all labels under the menu container, match by normalized text
+  // Find all labels under the menu container - also try additional selectors
+  // to be more robust across different ClaimCenter versions
   const labels = Array.from(
-    menu_links_container.querySelectorAll("div.gw-label")
+    menu_links_container.querySelectorAll("div.gw-label, span.gw-label, a.gw-label, li.gw-menu-item, a[role='menuitem'], li a")
   );
 
+  // Debug: log all available labels for troubleshooting
+  console.log("[cc.js] Debug - TargetPage sought:", TARGET_PAGE_RAW, "-> normalized:", desired, "-> words:", desiredWords);
+  console.log("[cc.js] Debug - Found labels:", labels.map(l => l.innerText?.trim()).filter(Boolean));
+
   let clicked = false;
+  
+  // Strategy 1: Exact match (original behavior)
   for (const lbl of labels) {
     const labelText = normalizeLabel(lbl?.innerText);
     if (!labelText) continue;
 
     if (labelText === desired) {
+      console.log("[cc.js] Debug - Exact match found:", lbl.innerText);
       // Click nearest meaningful clickable wrapper
       const clickable =
         lbl.closest('a, button, [role="menuitem"]') ||
@@ -233,12 +242,90 @@ function normalizeLabel(s) {
     }
   }
 
+  // Strategy 2: Partial match - if label contains the full desired text
+  if (!clicked) {
+    for (const lbl of labels) {
+      const labelText = normalizeLabel(lbl?.innerText);
+      if (!labelText) continue;
+
+      if (labelText.includes(desired)) {
+        console.log("[cc.js] Debug - Partial match (contains) found:", lbl.innerText);
+        const clickable =
+          lbl.closest('a, button, [role="menuitem"]') ||
+          lbl.closest("li") ||
+          lbl.parentElement;
+
+        if (clickable) {
+          await robustClick(clickable);
+          clicked = true;
+        }
+        break;
+      }
+    }
+  }
+
+  // Strategy 3: Individual word match - match if ALL desired words are present in label
+  // This handles cases like "claim overview summary" matching "Overview"
+  if (!clicked) {
+    for (const lbl of labels) {
+      const labelText = normalizeLabel(lbl?.innerText);
+      if (!labelText) continue;
+
+      // Check if all desired words are found in the label
+      const allWordsFound = desiredWords.every(word => labelText.includes(word));
+      
+      if (allWordsFound && desiredWords.length > 0) {
+        console.log("[cc.js] Debug - Word match found:", lbl.innerText, "matched words:", desiredWords);
+        const clickable =
+          lbl.closest('a, button, [role="menuitem"]') ||
+          lbl.closest("li") ||
+          lbl.parentElement;
+
+        if (clickable) {
+          await robustClick(clickable);
+          clicked = true;
+        }
+        break;
+      }
+    }
+  }
+
+  // Strategy 4: Fuzzy match - match if at least one significant word matches
+  // Filter out common words that aren't distinctive
+  const significantWords = desiredWords.filter(w => 
+    w.length > 3 && !['and', 'the', 'for', 'with'].includes(w)
+  );
+  
+  if (!clicked && significantWords.length > 0) {
+    for (const lbl of labels) {
+      const labelText = normalizeLabel(lbl?.innerText);
+      if (!labelText) continue;
+
+      // Check if at least one significant word matches
+      const anyWordFound = significantWords.some(word => labelText.includes(word));
+      
+      if (anyWordFound) {
+        console.log("[cc.js] Debug - Fuzzy match found:", lbl.innerText, "matched significant words:", significantWords);
+        const clickable =
+          lbl.closest('a, button, [role="menuitem"]') ||
+          lbl.closest("li") ||
+          lbl.parentElement;
+
+        if (clickable) {
+          await robustClick(clickable);
+          clicked = true;
+        }
+        break;
+      }
+    }
+  }
+
   // Reset URL (always)
   history.pushState({}, "", window.location.origin + window.location.pathname);
 
   // Optional debug
   if (!clicked) {
-    console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW);
+    console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW, "(normalized:", desired, ")");
   }
 })();
 
