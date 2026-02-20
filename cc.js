@@ -132,7 +132,142 @@ function normalizeLabel(s) {
     .replace(/\s+/g, " ");
 }
 
-(async () => {
+// -----------------------
+// SESSION CHECK - Wait for login if not authenticated
+// -----------------------
+
+/**
+ * Check if the user is on a ClaimCenter login page
+ * Returns true if already authenticated, false if on login page
+ */
+function isOnLoginPage() {
+  // Check URL for login indicators
+  const url = window.location.href.toLowerCase();
+  if (url.includes('login') || url.includes('auth') || url.includes('signin')) {
+    return true;
+  }
+
+  // Check for login form elements (Guidewire typically has these)
+  const loginForm = document.querySelector('form[name="loginForm"], form[id*="login"], form[class*="login"]');
+  if (loginForm) {
+    return true;
+  }
+
+  // Check for username/password fields on what looks like a login page
+  const usernameField = document.querySelector('input[name="username"], input[name="userid"], input[id*="username"], input[id*="userid"]');
+  const passwordField = document.querySelector('input[type="password"]');
+
+  // If we have both username and password fields, likely on login page
+  if (usernameField && passwordField) {
+    return true;
+  }
+
+  // Check for Guidewire-specific login elements
+  const gwLogin = document.querySelector('.gw-login, #gw-login, [class*="LoginScreen"]');
+  if (gwLogin) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Wait for user to complete login
+ * Returns a promise that resolves when authentication is complete
+ */
+async function waitForLogin(timeoutMs = 300000) { // 5 minute timeout
+  console.log("[cc.js] Session - Not logged in, waiting for login...");
+
+  return new Promise((resolve, reject) => {
+    let timeoutId = null;
+    let observer = null;
+
+    const checkAuthenticated = () => {
+      // If no longer on login page, user has authenticated
+      if (!isOnLoginPage()) {
+        console.log("[cc.js] Session - Login detected, proceeding with automation");
+        
+        // Give the page a moment to load the authenticated content
+        setTimeout(() => {
+          if (timeoutId) clearTimeout(timeoutId);
+          if (observer) observer.disconnect();
+          resolve(true);
+        }, 1500);
+        
+        return true;
+      }
+      return false;
+    };
+
+    // Check immediately in case login already completed
+    if (checkAuthenticated()) return;
+
+    // Set up timeout
+    timeoutId = setTimeout(() => {
+      if (observer) observer.disconnect();
+      console.warn("[cc.js] Session - Login wait timeout after 5 minutes");
+      reject(new Error("Login timeout - user did not authenticate within 5 minutes"));
+    }, timeoutMs);
+
+    // Watch for DOM changes that indicate login succeeded
+    observer = new MutationObserver((mutations) => {
+      // Debounce the check slightly
+      setTimeout(() => {
+        checkAuthenticated();
+      }, 500);
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "id"]
+    });
+
+    // Also check on URL changes (SPAs may change URL without DOM mutations)
+    let lastUrl = window.location.href;
+    const urlCheckInterval = setInterval(() => {
+      if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        checkAuthenticated();
+      }
+    }, 1000);
+
+    // Clean up interval when resolved
+    const originalResolve = resolve;
+    resolve = (val) => {
+      clearInterval(urlCheckInterval);
+      originalResolve(val);
+    };
+  });
+}
+
+/**
+ * Main session check function - call this before running any automation
+ * Returns true if session is valid, waits for login if needed
+ */
+async function ensureSession() {
+  // Quick check first - if not on login page, we're good
+  if (!isOnLoginPage()) {
+    console.log("[cc.js] Session - Already authenticated");
+    return true;
+  }
+
+  // We're on login page - wait for user to authenticate
+  try {
+    await waitForLogin();
+    return true;
+  } catch (error) {
+    console.error("[cc.js] Session - Failed:", error.message);
+    return false;
+  }
+}
+
+/**
+ * Main automation runner with session handling and auto-retry
+ * This function contains all the automation logic and handles session issues
+ */
+async function runAutomation() {
   //
   // NAVIGATING TO CLAIM.
   //
@@ -327,15 +462,153 @@ function normalizeLabel(s) {
   if (!clicked) {
     console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW, "(normalized:", desired, ")");
   }
+}
+
+/**
+ * Watch for session refresh (page reload due to session expiry)
+ * Returns a promise that resolves when the page has re-authenticated
+ */
+function watchForSessionRefresh(initialUrl, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    let timeoutId = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("Session refresh timeout"));
+    }, timeoutMs);
+
+    const observer = new MutationObserver((mutations) => {
+      // Check if the page has reloaded or redirected
+      if (window.location.href !== initialUrl) {
+        // Page URL changed - could be session refresh
+        console.log("[cc.js] Session - Detected URL change, waiting for stabilization...");
+        
+        // Wait a bit for the new page to settle
+        setTimeout(() => {
+          clearTimeout(timeoutId);
+          observer.disconnect();
+          resolve(true);
+        }, 2000);
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+}
+
+/**
+ * Run automation with session handling and auto-retry
+ * Handles session expiry by detecting page reloads and waiting for re-authentication
+ */
+async function runAutomationWithSessionHandling() {
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 3000;
+  
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`[cc.js] Session - Automation attempt ${attempt} of ${MAX_RETRIES}`);
+      
+      // Capture URL before automation
+      const urlBefore = window.location.href;
+      
+      // Check and ensure session is valid
+      const sessionOk = await ensureSession();
+      if (!sessionOk) {
+        console.warn("[cc.js] Session - Failed to establish valid session");
+        lastError = new Error("Session validation failed");
+        continue;
+      }
+      
+      // Run the automation
+      await runAutomation();
+      
+      // If we get here, automation completed successfully
+      console.log("[cc.js] Session - Automation completed successfully");
+      return true;
+      
+    } catch (error) {
+      lastError = error;
+      console.warn(`[cc.js] Session - Automation attempt ${attempt} failed:`, error.message);
+      
+      // Check if this might be a session-related error
+      const isSessionError = 
+        error.message?.includes("session") ||
+        error.message?.includes("login") ||
+        error.message?.includes("auth") ||
+        error.message?.includes("timeout") ||
+        error.message?.includes("Failed to find") ||
+        error.message?.includes("Cannot read properties");
+      
+      if (isSessionError && attempt < MAX_RETRIES) {
+        console.log(`[cc.js] Session - Retrying after ${RETRY_DELAY_MS}ms...`);
+        await sleep(RETRY_DELAY_MS);
+        
+        // Check if page has refreshed (session was reset)
+        try {
+          await watchForSessionRefresh(window.location.href, 30000);
+          console.log("[cc.js] Session - Page refreshed, re-establishing session...");
+        } catch (refreshError) {
+          console.warn("[cc.js] Session - No page refresh detected, retrying anyway");
+        }
+      }
+    }
+  }
+  
+  // All retries exhausted
+  console.error("[cc.js] Session - All automation attempts failed:", lastError?.message);
+  return false;
+}
+
+// Helper sleep function
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Main IIFE entry point
+(async () => {
+  // Check if this is a process URL (has automation request)
+  const PARAMS = new URLSearchParams(window.location.search);
+  const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+  
+  // Only run automation if there's a target claim
+  if (!TARGET_CLAIM) return;
+  
+  // Run with session handling and auto-retry
+  await runAutomationWithSessionHandling();
 })();
 
-// Minimal message listener for service worker
+// Message listener for service worker commands
+// This handles RUN_NOW messages from the service worker
 try {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    // Handle ping from service worker to check if content script is alive
     if (msg?.type === "PING_TM") {
       sendResponse({ ok: true, process: true });
       return true;
     }
+    
+    // Handle RUN_NOW command - service worker tells us to run automation
+    if (msg?.type === "RUN_NOW") {
+      console.log("[cc.js] Received RUN_NOW command, starting automation...");
+      
+      // Run automation with session handling
+      runAutomationWithSessionHandling()
+        .then((result) => {
+          sendResponse({ ok: true, result });
+        })
+        .catch((err) => {
+          sendResponse({ ok: false, error: err.message });
+        });
+      
+      // Return true to indicate we'll respond asynchronously
+      return true;
+    }
+    
     return false;
   });
-} catch (e) {}
+} catch (e) {
+  console.warn("[cc.js] Message listener setup failed:", e);
+}

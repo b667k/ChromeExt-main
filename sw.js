@@ -153,10 +153,14 @@ async function trySend(tabId, payload) {
 
 // More reliable than blind RUN_NOW: wait until the content script is actually alive.
 async function pingThenRun(tabId, req, attempts = 12) {
+  // Track consecutive failures for session detection
+  let consecutiveFailures = 0;
+  
   for (let i = 0; i < attempts; i++) {
     const ping = await trySend(tabId, { type: "PING_TM" });
 
     if (ping.ok) {
+      consecutiveFailures = 0; // Reset failure counter on success
       const run = await trySend(tabId, { type: "RUN_NOW", req });
       if (run.ok) return { delivered: true, reason: "ping_ok_run_ok" };
 
@@ -164,7 +168,15 @@ async function pingThenRun(tabId, req, attempts = 12) {
       // small retry even if ping worked (rare timing issues)
     } else {
       // Most common error here: "Could not establish connection. Receiving end does not exist."
-      if (DEBUG) warn("PING failed", { i: i + 1, err: ping.err });
+      consecutiveFailures++;
+      if (DEBUG) warn("PING failed", { i: i + 1, err: ping.err, consecutive: consecutiveFailures });
+      
+      // If we have multiple consecutive failures, might be a session reload
+      // Give the page more time to settle
+      if (consecutiveFailures >= 3) {
+        log("Multiple ping failures - possibly session reload, waiting longer...");
+        await sleep(1500); // Extra wait on potential session reload
+      }
     }
 
     await sleep(250 + i * 50);
