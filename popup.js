@@ -57,7 +57,12 @@ async function saveSettings(next) {
 
   // Broadcast: force content scripts to refresh immediately (no reload)
   try {
-    chrome.runtime.sendMessage({ type: "P2CC_SETTINGS_UPDATED" }, () => {});
+    chrome.runtime.sendMessage({ type: "P2CC_SETTINGS_UPDATED" }, (response) => {
+      if (chrome.runtime.lastError) {
+        // Silently handle - service worker may not be ready or may not have a listener
+        // This is expected in some scenarios and not a critical error
+      }
+    });
   } catch {}
 
   // Optional: if you have "tabs" permission, this will target the active tab too.
@@ -67,7 +72,11 @@ async function saveSettings(next) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tabId = tabs?.[0]?.id;
         if (tabId != null) {
-          chrome.tabs.sendMessage(tabId, { type: "P2CC_SETTINGS_UPDATED" }, () => {});
+          chrome.tabs.sendMessage(tabId, { type: "P2CC_SETTINGS_UPDATED" }, (response) => {
+            if (chrome.runtime.lastError) {
+              // Silently handle - content script may not be loaded in this tab
+            }
+          });
         }
       });
     }

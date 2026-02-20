@@ -384,6 +384,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     }
 
+    // ---- Settings updated notification (from popup) ----
+    if (msg?.type === "P2CC_SETTINGS_UPDATED") {
+      // Acknowledged - content scripts will pick up changes via storage.onChanged
+      sendResponse({ ok: true });
+      return;
+    }
+
     // default
     sendResponse({ ok: false, error: "Unhandled message type" });
   })().catch((e) => {
