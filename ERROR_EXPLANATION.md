@@ -6,21 +6,7 @@
 
 **Cause:** The service worker (sw.js) is trying to send messages to the ClaimCenter content script (cc.js), but the content script hasn't been injected yet or is not responding.
 
-**This is EXPECTED and HANDLED** - The service worker has retry logic in the `pingThenRun` function:
-
-```
-javascript
-// Most common error here: "Could not establish connection. Receiving end does not exist."
-consecutiveFailures++;
-if (DEBUG) warn("PING failed", { i: i + 1, err: ping.err, consecutive: consecutiveFailures });
-
-// If we have multiple consecutive failures, might be a session reload
-// Give the page more time to settle
-if (consecutiveFailures >= 3) {
-  log("Multiple ping failures - possibly session reload, waiting longer...");
-  await sleep(1500); // Extra wait on potential session reload
-}
-```
+**This is EXPECTED and HANDLED** - The service worker has retry logic in the `pingThenRun` function.
 
 This happens when:
 - The ClaimCenter tab is still loading (content script hasn't injected yet)
@@ -78,6 +64,65 @@ This happens when:
 
 ---
 
+# SESSION TIMEOUT ISSUE - Debugging Added!
+
+## What Changed:
+
+I've added **extensive debugging** to `cc.js` that will log detailed information to the Chrome DevTools Console when you run the extension. This will help us understand exactly what's happening with the session.
+
+## How to Use the Debug Logs:
+
+1. Open Chrome DevTools (F12 or Right-click → Inspect)
+2. Go to the **Console** tab
+3. Run the extension (click the button on Portal)
+4. Look for messages starting with `[cc.js] DEBUG:`
+
+## What the Debug Logs Show:
+
+### When the content script loads, you'll see:
+```
+=== [cc.js] DEBUG: Page State ===
+Full URL: https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?...
+Pathname: /ClaimCenter.do
+Search params: tm_t=...&process=true&claimNumber=...
+=============================
+[cc.js] DEBUG: Cookies present: YES/NO
+[cc.js] DEBUG: Cookie names: JSESSIONID, ...
+[cc.js] DEBUG: document.readyState: complete
+[cc.js] DEBUG: document.title: ClaimCenter
+[cc.js] DEBUG: body.childElementCount: ...
+=================================
+```
+
+### When checking session validity, you'll see:
+```
+[cc.js] DEBUG: Checking session validity...
+[cc.js] DEBUG: Current URL: https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/ClaimCenter.do?...
+[cc.js] DEBUG: Current pathname: /claimcenter.do
+[cc.js] DEBUG: Session INVALID/VALID - ...
+[cc.js] DEBUG: Has Claim menu: true/false
+[cc.js] DEBUG: Has Search screen: true/false
+```
+
+## What to Look For:
+
+1. **Cookies**: Are cookies present? If NO, that's a problem - the session isn't being maintained
+2. **URL changes**: Does the URL change unexpectedly?
+3. **Claim menu/Search screen**: Are these elements found? If NOT, you may be on an unexpected page
+4. **Session INVALID messages**: This will tell us if the session check thinks you're logged out
+
+## After Timeout:
+
+When the session times out:
+1. Check the console for `[cc.js] DEBUG:` messages
+2. Look at what URL it shows - is it redirecting somewhere?
+3. Check if cookies disappeared
+4. Look at the page text - does it show "session expired" or similar?
+
+This debug info will help us understand exactly what's happening with your session/cookies!
+
+---
+
 ## Summary
 
 | Error | Type | Cause | Solution |
@@ -88,5 +133,3 @@ This happens when:
 | "$ is not defined" | Page issue | jQuery not loaded | Fix in Portal website |
 | "preloaded but not used" | Warning | Resource not used | Check preload usage |
 | "insecure connection" | Security | HTTP vs HTTPS | Fix server config |
-
-The "Could not establish connection" errors are **normal behavior** for this extension. The code already handles these scenarios with the retry mechanism in `pingThenRun()` function.

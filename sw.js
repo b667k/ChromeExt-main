@@ -50,12 +50,17 @@ function buildCcUrl(req, claim, targetPage) {
   const u = new URL(CC_URL_BASE);
   u.searchParams.set("tm_t", String(req));
   u.searchParams.set("process", "true");
-  if (claim) u.searchParams.set("claimNumber", String(claim));
+  if (claim) {
+    u.searchParams.set("claimNumber", String(claim));
+    log("BUILDING URL with claimNumber:", claim);
+  }
 
-  // ✅ Add target page for cc.js to consume
+  // Add target page for cc.js to consume
   if (targetPage) u.searchParams.set("TargetPage", String(targetPage));
 
-  return u.toString();
+  const urlStr = u.toString();
+  log("BUILD URL:", urlStr);
+  return urlStr;
 }
 
 function isProcessUrl(urlStr) {
@@ -152,7 +157,7 @@ async function trySend(tabId, payload) {
 }
 
 // More reliable than blind RUN_NOW: wait until the content script is actually alive.
-async function pingThenRun(tabId, req, attempts = 12) {
+async function pingThenRun(tabId, req, claim, targetPage, attempts = 12) {
   // Track consecutive failures for session detection
   let consecutiveFailures = 0;
   
@@ -161,7 +166,8 @@ async function pingThenRun(tabId, req, attempts = 12) {
 
     if (ping.ok) {
       consecutiveFailures = 0; // Reset failure counter on success
-      const run = await trySend(tabId, { type: "RUN_NOW", req });
+      // Pass claim and targetPage directly in the message (URL params get stripped by server)
+      const run = await trySend(tabId, { type: "RUN_NOW", req, claim, targetPage });
       if (run.ok) return { delivered: true, reason: "ping_ok_run_ok" };
 
       warn("RUN_NOW failed after ping ok", { err: run.err });
@@ -315,7 +321,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       // Deliver: ping until receiver exists, then RUN_NOW(req)
-      const result = await pingThenRun(tab.id, req, 12);
+      const result = await pingThenRun(tab.id, req, claim, targetPage, 12);
 
       // Re-check latest-wins after delivery attempts
       if (!(await stillLatestReq(req))) {

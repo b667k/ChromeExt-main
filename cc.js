@@ -1,4 +1,5 @@
-// cc.js - UPDATED: robust TargetPage matching (case/spacing/underscore tolerant)
+// cc.js - UPDATED: robust TargetPage matching + DEBUG URL logging
+// DEBUG: Added detailed URL and session state logging to diagnose timeout issues
 
 async function robustClick(el) {
   if (!el) return;
@@ -133,110 +134,235 @@ function normalizeLabel(s) {
 }
 
 // -----------------------
-// SESSION CHECK - Wait for login if not authenticated
+// DEBUG: Log current URL and page state
+// -----------------------
+function debugLogPageState() {
+  const url = window.location.href;
+  const pathname = window.location.pathname;
+  const search = window.location.search;
+
+  console.log("=== [cc.js] DEBUG: Page State ===");
+  console.log("Full URL:", url);
+  console.log("Pathname:", pathname);
+  console.log("Search params:", search);
+  console.log("=============================");
+
+  // Log cookies for this domain
+  try {
+    const cookies = document.cookie;
+    console.log(
+      "[cc.js] DEBUG: Cookies present:",
+      cookies.length > 0 ? "YES" : "NO"
+    );
+    if (cookies.length > 0) {
+      // Show cookie names (not values) for debugging
+      const cookieNames = cookies
+        .split(";")
+        .map((c) => c.trim().split("=")[0]);
+      console.log("[cc.js] DEBUG: Cookie names:", cookieNames.join(", "));
+    }
+  } catch (e) {
+    console.log("[cc.js] DEBUG: Could not read cookies:", e.message);
+  }
+
+  // Log document ready state
+  console.log("[cc.js] DEBUG: document.readyState:", document.readyState);
+  console.log("[cc.js] DEBUG: document.title:", document.title);
+
+  // Log body content info
+  if (document.body) {
+    console.log(
+      "[cc.js] DEBUG: body.childElementCount:",
+      document.body.childElementCount
+    );
+    console.log(
+      "[cc.js] DEBUG: body.innerText (first 200 chars):",
+      (document.body.innerText || "").substring(0, 200)
+    );
+  }
+  console.log("=================================");
+}
+
+// -----------------------
+// SESSION CHECK - Check session/cookies instead of login page
 // -----------------------
 
 /**
- * Check if the user is on a ClaimCenter login page
- * Returns true if already authenticated, false if on login page
+ * Check if the session is valid by examining the page state
+ * Returns true if session appears valid, false if session seems invalid/redirected
  */
-function isOnLoginPage() {
-  // Check URL for login indicators
+function isSessionInvalid() {
   const url = window.location.href.toLowerCase();
-  if (url.includes('login') || url.includes('auth') || url.includes('signin')) {
+  const pathname = window.location.pathname.toLowerCase();
+
+  // DEBUG: Log what we're checking
+  console.log("[cc.js] DEBUG: Checking session validity...");
+  console.log("[cc.js] DEBUG: Current URL:", window.location.href);
+  console.log("[cc.js] DEBUG: Current pathname:", pathname);
+
+  // Check 1: URL redirects to login/auth
+  if (
+    url.includes("login") ||
+    url.includes("auth") ||
+    url.includes("signin") ||
+    url.includes("/login.")
+  ) {
+    console.log("[cc.js] DEBUG: Session INVALID - URL contains login/auth");
     return true;
   }
 
-  // Check for login form elements (Guidewire typically has these)
-  const loginForm = document.querySelector('form[name="loginForm"], form[id*="login"], form[class*="login"]');
-  if (loginForm) {
+  // Check 2: URL has unexpected paths (like /login.do, /session expired, etc)
+  if (
+    pathname.includes("session") ||
+    pathname.includes("expired") ||
+    pathname.endsWith("/login")
+  ) {
+    console.log(
+      "[cc.js] DEBUG: Session INVALID - pathname indicates session issue"
+    );
     return true;
   }
 
-  // Check for username/password fields on what looks like a login page
-  const usernameField = document.querySelector('input[name="username"], input[name="userid"], input[id*="username"], input[id*="userid"]');
-  const passwordField = document.querySelector('input[type="password"]');
+  // Check 3: Look for common session-timeout indicators in the page
+  const pageText = (document.body?.innerText || "").toLowerCase();
 
-  // If we have both username and password fields, likely on login page
-  if (usernameField && passwordField) {
-    return true;
+  // Common timeout/session expired messages
+  const timeoutIndicators = [
+    "session expired",
+    "your session has expired",
+    "please log in again",
+    "session timeout",
+    "re-login required",
+    "authentication required",
+    "login to continue",
+  ];
+
+  for (const indicator of timeoutIndicators) {
+    if (pageText.includes(indicator)) {
+      console.log("[cc.js] DEBUG: Session INVALID - Page contains:", indicator);
+      return true;
+    }
   }
 
-  // Check for Guidewire-specific login elements
-  const gwLogin = document.querySelector('.gw-login, #gw-login, [class*="LoginScreen"]');
-  if (gwLogin) {
-    return true;
+  // Check 4: No claim-related elements found (suggests not on expected page)
+  // Wait for Claim menu or search to be present
+  const hasClaimMenu =
+    document.querySelector("#Claim-MenuLinks") ||
+    document.querySelector("[id*='ClaimScreen']");
+  const hasSearchScreen =
+    document.querySelector("#SimpleClaimSearch-SimpleClaimSearchScreen-ttlBar") ||
+    document.querySelector("#TabBar-SearchTab");
+
+  console.log("[cc.js] DEBUG: Has Claim menu:", !!hasClaimMenu);
+  console.log("[cc.js] DEBUG: Has Search screen:", !!hasSearchScreen);
+
+  // If we have neither, might be on an unexpected page
+  if (!hasClaimMenu && !hasSearchScreen && document.readyState === "complete") {
+    // Give it a moment - could be still loading
+    console.log(
+      "[cc.js] DEBUG: WARNING - No Claim menu or Search screen found"
+    );
+    // Don't immediately return invalid - could be still loading
   }
 
+  console.log("[cc.js] DEBUG: Session appears VALID");
   return false;
 }
 
 /**
- * Wait for user to complete login
- * Returns a promise that resolves when authentication is complete
+ * Wait for session to become valid (wait for redirect after login or page load)
+ * Returns a promise that resolves when session is valid
  */
-async function waitForLogin(timeoutMs = 300000) { // 5 minute timeout
-  console.log("[cc.js] Session - Not logged in, waiting for login...");
+async function waitForValidSession(timeoutMs = 300000) {
+  // 5 minute timeout
+  console.log(
+    "[cc.js] Session - Session may be invalid, waiting for it to become valid..."
+  );
 
   return new Promise((resolve, reject) => {
     let timeoutId = null;
     let observer = null;
+    let urlCheckInterval = null;
 
-    const checkAuthenticated = () => {
-      // If no longer on login page, user has authenticated
-      if (!isOnLoginPage()) {
-        console.log("[cc.js] Session - Login detected, proceeding with automation");
-        
-        // Give the page a moment to load the authenticated content
+    const checkValid = () => {
+      if (!isSessionInvalid()) {
+        console.log(
+          "[cc.js] Session - Session is now VALID, proceeding with automation"
+        );
+
+        // Give the page a moment to load the content
         setTimeout(() => {
           if (timeoutId) clearTimeout(timeoutId);
           if (observer) observer.disconnect();
+          if (urlCheckInterval) clearInterval(urlCheckInterval);
           resolve(true);
         }, 1500);
-        
+
         return true;
       }
       return false;
     };
 
-    // Check immediately in case login already completed
-    if (checkAuthenticated()) return;
+    // Check immediately in case session is already valid
+    if (checkValid()) return;
 
     // Set up timeout
     timeoutId = setTimeout(() => {
       if (observer) observer.disconnect();
-      console.warn("[cc.js] Session - Login wait timeout after 5 minutes");
-      reject(new Error("Login timeout - user did not authenticate within 5 minutes"));
+      if (urlCheckInterval) clearInterval(urlCheckInterval);
+      console.warn("[cc.js] Session - Session wait timeout after 5 minutes");
+      reject(
+        new Error(
+          "Session timeout - session did not become valid within 5 minutes"
+        )
+      );
     }, timeoutMs);
 
-    // Watch for DOM changes that indicate login succeeded
+    // Watch for DOM changes that indicate session became valid
     observer = new MutationObserver((mutations) => {
-      // Debounce the check slightly
       setTimeout(() => {
-        checkAuthenticated();
+        checkValid();
       }, 500);
     });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["class", "id"]
-    });
+    try {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "id"],
+      });
+    } catch (e) {
+      // Body might not be ready yet
+      console.log("[cc.js] DEBUG: Could not observe body, trying window...");
+    }
 
     // Also check on URL changes (SPAs may change URL without DOM mutations)
     let lastUrl = window.location.href;
-    const urlCheckInterval = setInterval(() => {
+    urlCheckInterval = setInterval(() => {
       if (window.location.href !== lastUrl) {
+        console.log(
+          "[cc.js] DEBUG: URL changed from:",
+          lastUrl,
+          "to:",
+          window.location.href
+        );
         lastUrl = window.location.href;
-        checkAuthenticated();
+        checkValid();
       }
     }, 1000);
 
-    // Clean up interval when resolved
+    // Clean up function
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (observer) observer.disconnect();
+      if (urlCheckInterval) clearInterval(urlCheckInterval);
+    };
+
+    // Override resolve to clean up
     const originalResolve = resolve;
     resolve = (val) => {
-      clearInterval(urlCheckInterval);
+      cleanup();
       originalResolve(val);
     };
   });
@@ -244,18 +370,18 @@ async function waitForLogin(timeoutMs = 300000) { // 5 minute timeout
 
 /**
  * Main session check function - call this before running any automation
- * Returns true if session is valid, waits for login if needed
+ * Returns true if session is valid, waits for session if needed
  */
 async function ensureSession() {
-  // Quick check first - if not on login page, we're good
-  if (!isOnLoginPage()) {
-    console.log("[cc.js] Session - Already authenticated");
+  // Quick check first - if session is valid, we're good
+  if (!isSessionInvalid()) {
+    console.log("[cc.js] Session - Already valid");
     return true;
   }
 
-  // We're on login page - wait for user to authenticate
+  // Session seems invalid - wait for it to become valid
   try {
-    await waitForLogin();
+    await waitForValidSession();
     return true;
   } catch (error) {
     console.error("[cc.js] Session - Failed:", error.message);
@@ -282,7 +408,12 @@ async function runAutomation() {
 
   // Extract URL params.
   const PARAMS = new URLSearchParams(window.location.search);
-  const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+
+  // UPDATED: allow fallback to claim passed in via RUN_NOW message
+  let TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+  if (!TARGET_CLAIM && globalThis._claimFromMessage) {
+    TARGET_CLAIM = globalThis._claimFromMessage;
+  }
 
   if (!TARGET_CLAIM) return;
 
@@ -313,11 +444,7 @@ async function runAutomation() {
   }
 
   // Click on the resulting claim.
-  let result_claim_btn = await waitForText(
-    SSS_RESULT_BUTTON,
-    TARGET_CLAIM,
-    6000
-  );
+  let result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
   if (!result_claim_btn) {
     // First-run fallback: trigger search one more time internally so user doesn't need to click again.
     await robustClick(claim_search_btn);
@@ -332,7 +459,12 @@ async function runAutomation() {
   // NAVIGATING TO PAGE IN CLAIM.
   //
 
-  const TARGET_PAGE_RAW = PARAMS.get("TargetPage");
+  // UPDATED: allow fallback to targetPage passed in via RUN_NOW message
+  let TARGET_PAGE_RAW = PARAMS.get("TargetPage");
+  if (!TARGET_PAGE_RAW && globalThis._targetPageFromMessage) {
+    TARGET_PAGE_RAW = globalThis._targetPageFromMessage;
+  }
+
   if (!TARGET_PAGE_RAW) {
     // Reset URL.
     history.pushState({}, "", window.location.origin + window.location.pathname);
@@ -340,22 +472,34 @@ async function runAutomation() {
   }
 
   const desired = normalizeLabel(TARGET_PAGE_RAW);
-  const desiredWords = desired.split(" ").filter(w => w.length > 0);
+  const desiredWords = desired.split(" ").filter((w) => w.length > 0);
   const CS_MENU_LINKS = "#Claim-MenuLinks";
   const menu_links_container = await waitForElm(CS_MENU_LINKS);
 
   // Find all labels under the menu container - also try additional selectors
   // to be more robust across different ClaimCenter versions
   const labels = Array.from(
-    menu_links_container.querySelectorAll("div.gw-label, span.gw-label, a.gw-label, li.gw-menu-item, a[role='menuitem'], li a")
+    menu_links_container.querySelectorAll(
+      "div.gw-label, span.gw-label, a.gw-label, li.gw-menu-item, a[role='menuitem'], li a"
+    )
   );
 
   // Debug: log all available labels for troubleshooting
-  console.log("[cc.js] Debug - TargetPage sought:", TARGET_PAGE_RAW, "-> normalized:", desired, "-> words:", desiredWords);
-  console.log("[cc.js] Debug - Found labels:", labels.map(l => l.innerText?.trim()).filter(Boolean));
+  console.log(
+    "[cc.js] Debug - TargetPage sought:",
+    TARGET_PAGE_RAW,
+    "-> normalized:",
+    desired,
+    "-> words:",
+    desiredWords
+  );
+  console.log(
+    "[cc.js] Debug - Found labels:",
+    labels.map((l) => l.innerText?.trim()).filter(Boolean)
+  );
 
   let clicked = false;
-  
+
   // Strategy 1: Exact match (original behavior)
   for (const lbl of labels) {
     const labelText = normalizeLabel(lbl?.innerText);
@@ -384,7 +528,10 @@ async function runAutomation() {
       if (!labelText) continue;
 
       if (labelText.includes(desired)) {
-        console.log("[cc.js] Debug - Partial match (contains) found:", lbl.innerText);
+        console.log(
+          "[cc.js] Debug - Partial match (contains) found:",
+          lbl.innerText
+        );
         const clickable =
           lbl.closest('a, button, [role="menuitem"]') ||
           lbl.closest("li") ||
@@ -407,10 +554,15 @@ async function runAutomation() {
       if (!labelText) continue;
 
       // Check if all desired words are found in the label
-      const allWordsFound = desiredWords.every(word => labelText.includes(word));
-      
+      const allWordsFound = desiredWords.every((word) => labelText.includes(word));
+
       if (allWordsFound && desiredWords.length > 0) {
-        console.log("[cc.js] Debug - Word match found:", lbl.innerText, "matched words:", desiredWords);
+        console.log(
+          "[cc.js] Debug - Word match found:",
+          lbl.innerText,
+          "matched words:",
+          desiredWords
+        );
         const clickable =
           lbl.closest('a, button, [role="menuitem"]') ||
           lbl.closest("li") ||
@@ -427,20 +579,25 @@ async function runAutomation() {
 
   // Strategy 4: Fuzzy match - match if at least one significant word matches
   // Filter out common words that aren't distinctive
-  const significantWords = desiredWords.filter(w => 
-    w.length > 3 && !['and', 'the', 'for', 'with'].includes(w)
+  const significantWords = desiredWords.filter(
+    (w) => w.length > 3 && !["and", "the", "for", "with"].includes(w)
   );
-  
+
   if (!clicked && significantWords.length > 0) {
     for (const lbl of labels) {
       const labelText = normalizeLabel(lbl?.innerText);
       if (!labelText) continue;
 
       // Check if at least one significant word matches
-      const anyWordFound = significantWords.some(word => labelText.includes(word));
-      
+      const anyWordFound = significantWords.some((word) => labelText.includes(word));
+
       if (anyWordFound) {
-        console.log("[cc.js] Debug - Fuzzy match found:", lbl.innerText, "matched significant words:", significantWords);
+        console.log(
+          "[cc.js] Debug - Fuzzy match found:",
+          lbl.innerText,
+          "matched significant words:",
+          significantWords
+        );
         const clickable =
           lbl.closest('a, button, [role="menuitem"]') ||
           lbl.closest("li") ||
@@ -460,7 +617,13 @@ async function runAutomation() {
 
   // Optional debug
   if (!clicked) {
-    console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW, "(normalized:", desired, ")");
+    console.warn(
+      "[cc.js] TargetPage not found:",
+      TARGET_PAGE_RAW,
+      "(normalized:",
+      desired,
+      ")"
+    );
   }
 }
 
@@ -479,8 +642,10 @@ function watchForSessionRefresh(initialUrl, timeoutMs = 60000) {
       // Check if the page has reloaded or redirected
       if (window.location.href !== initialUrl) {
         // Page URL changed - could be session refresh
-        console.log("[cc.js] Session - Detected URL change, waiting for stabilization...");
-        
+        console.log(
+          "[cc.js] Session - Detected URL change, waiting for stabilization..."
+        );
+
         // Wait a bit for the new page to settle
         setTimeout(() => {
           clearTimeout(timeoutId);
@@ -504,16 +669,21 @@ function watchForSessionRefresh(initialUrl, timeoutMs = 60000) {
 async function runAutomationWithSessionHandling() {
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 3000;
-  
+
   let lastError = null;
-  
+
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      console.log(`[cc.js] Session - Automation attempt ${attempt} of ${MAX_RETRIES}`);
-      
+      console.log(
+        `[cc.js] Session - Automation attempt ${attempt} of ${MAX_RETRIES}`
+      );
+
+      // DEBUG: Log page state at start of each attempt
+      debugLogPageState();
+
       // Capture URL before automation
       const urlBefore = window.location.href;
-      
+
       // Check and ensure session is valid
       const sessionOk = await ensureSession();
       if (!sessionOk) {
@@ -521,42 +691,46 @@ async function runAutomationWithSessionHandling() {
         lastError = new Error("Session validation failed");
         continue;
       }
-      
+
       // Run the automation
       await runAutomation();
-      
+
       // If we get here, automation completed successfully
       console.log("[cc.js] Session - Automation completed successfully");
       return true;
-      
     } catch (error) {
       lastError = error;
-      console.warn(`[cc.js] Session - Automation attempt ${attempt} failed:`, error.message);
-      
+      console.warn(
+        `[cc.js] Session - Automation attempt ${attempt} failed:`,
+        error.message
+      );
+
       // Check if this might be a session-related error
-      const isSessionError = 
+      const isSessionError =
         error.message?.includes("session") ||
         error.message?.includes("login") ||
         error.message?.includes("auth") ||
         error.message?.includes("timeout") ||
         error.message?.includes("Failed to find") ||
         error.message?.includes("Cannot read properties");
-      
+
       if (isSessionError && attempt < MAX_RETRIES) {
         console.log(`[cc.js] Session - Retrying after ${RETRY_DELAY_MS}ms...`);
         await sleep(RETRY_DELAY_MS);
-        
+
         // Check if page has refreshed (session was reset)
         try {
           await watchForSessionRefresh(window.location.href, 30000);
           console.log("[cc.js] Session - Page refreshed, re-establishing session...");
         } catch (refreshError) {
-          console.warn("[cc.js] Session - No page refresh detected, retrying anyway");
+          console.warn(
+            "[cc.js] Session - No page refresh detected, retrying anyway"
+          );
         }
       }
     }
   }
-  
+
   // All retries exhausted
   console.error("[cc.js] Session - All automation attempts failed:", lastError?.message);
   return false;
@@ -564,7 +738,7 @@ async function runAutomationWithSessionHandling() {
 
 // Helper sleep function
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Main IIFE entry point
@@ -572,10 +746,14 @@ function sleep(ms) {
   // Check if this is a process URL (has automation request)
   const PARAMS = new URLSearchParams(window.location.search);
   const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
-  
+
   // Only run automation if there's a target claim
   if (!TARGET_CLAIM) return;
-  
+
+  // DEBUG: Log initial page state
+  console.log("[cc.js] DEBUG: Content script loaded for claim:", TARGET_CLAIM);
+  debugLogPageState();
+
   // Run with session handling and auto-retry
   await runAutomationWithSessionHandling();
 })();
@@ -589,11 +767,24 @@ try {
       sendResponse({ ok: true, process: true });
       return true;
     }
-    
+
     // Handle RUN_NOW command - service worker tells us to run automation
     if (msg?.type === "RUN_NOW") {
       console.log("[cc.js] Received RUN_NOW command, starting automation...");
-      
+
+      // NEW: Pull optional claim + targetPage off the message and store globally
+      if (msg.claim) {
+        console.log("[cc.js] Using claim from message:", msg.claim);
+        globalThis._claimFromMessage = msg.claim;
+      }
+      if (msg.targetPage) {
+        console.log("[cc.js] Using targetPage from message:", msg.targetPage);
+        globalThis._targetPageFromMessage = msg.targetPage;
+      }
+
+      // DEBUG: Log page state when RUN_NOW is received
+      debugLogPageState();
+
       // Run automation with session handling
       runAutomationWithSessionHandling()
         .then((result) => {
@@ -602,11 +793,11 @@ try {
         .catch((err) => {
           sendResponse({ ok: false, error: err.message });
         });
-      
+
       // Return true to indicate we'll respond asynchronously
       return true;
     }
-    
+
     return false;
   });
 } catch (e) {
