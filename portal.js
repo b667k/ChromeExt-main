@@ -31,17 +31,21 @@
   const DEFAULT_SETTINGS = {
     runMode: "full",
     buttons: { p2cc: true, thirdYear: true },
+    autoDropdown: true,
   };
 
   function normalizeSettings(raw) {
     const runMode = raw?.runMode || DEFAULT_SETTINGS.runMode;
     const b = raw?.buttons || {};
+    const autoDropdown =
+      typeof raw?.autoDropdown === "boolean" ? raw.autoDropdown : DEFAULT_SETTINGS.autoDropdown;
     return {
       runMode,
       buttons: {
         p2cc: typeof b.p2cc === "boolean" ? b.p2cc : DEFAULT_SETTINGS.buttons.p2cc,
         thirdYear: typeof b.thirdYear === "boolean" ? b.thirdYear : DEFAULT_SETTINGS.buttons.thirdYear,
       },
+      autoDropdown,
     };
   }
 
@@ -374,6 +378,31 @@ End Sub`;
     URL.revokeObjectURL(url);
   }
 
+  // Flag to track if autoDropdown has already run
+  let autoDropdownRun = false;
+
+  // Auto Dropdown function - expands the Mainframe System Interactions dropdown
+  function autoExpandMainframe() {
+    console.log("Auto-expanded Mainframe System Interactions dropdown.");
+    const div = document.querySelector("#Mainframediv");
+    if (div) {
+      div.click();
+    }
+  }
+
+  async function runAutoDropdown() {
+    if (!alive) return;
+    if (autoDropdownRun) return; // Only run once
+
+    const settings = await getSettings();
+    if (!alive) return;
+
+    if (settings.autoDropdown) {
+      autoExpandMainframe();
+      autoDropdownRun = true; // Mark as run so it doesn't run again
+    }
+  }
+
   async function addButtons(container) {
     if (!alive || !container) return;
 
@@ -484,6 +513,7 @@ End Sub`;
     normalizeExistingWrappers(c);
     addButtons(c);
     checkPaAutoTriggers();
+    runAutoDropdown();
   }
 
   // ✅ Live updates without reload:

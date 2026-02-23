@@ -97,10 +97,10 @@
               </select>
             </div>
 
-            <div class="footer">
-              <span><strong>Tip: </strong>Pick a mode that best fits your workflow.</span>
-            </div>
-          </section>
+       <div class="footer">
+  <span><strong>Tip: </strong>Pick a mode that best fits your workflow.</span>
+  <button id="openChangelog" class="linkBtn">Changelog</button>
+</div>
 
           <section class="tabPanel" id="panelSettingsTab" role="tabpanel" aria-label="Settings">
             <div class="sectionTitle">Settings</div>
@@ -112,7 +112,7 @@
               <div class="toggleCard">
                 <div class="toggleText">
                   <div class="toggleTitle">
-                    Show “<span id="p2ccLabel">Open Claim in ECC</span>” button
+                    Show "<span id="p2ccLabel">Open Claim in ECC</span>" button
                   </div>
                   <div class="toggleDesc">Controls the main Portal claim action button.</div>
                 </div>
@@ -124,7 +124,7 @@
 
               <div class="toggleCard">
                 <div class="toggleText">
-                  <div class="toggleTitle">Show “Check 3rd year” button</div>
+                  <div class="toggleTitle">Show "Check 3rd year" button</div>
                   <div class="toggleDesc">Controls the .bbs download helper button.</div>
                 </div>
                 <label class="switch">
@@ -132,10 +132,21 @@
                   <span class="slider" aria-hidden="true"></span>
                 </label>
               </div>
+
+              <div class="toggleCard">
+                <div class="toggleText">
+                  <div class="toggleTitle">Auto Dropdown</div>
+                  <div class="toggleDesc">Automatically expands the Mainframe System Interactions dropdown.</div>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="toggle_autoDropdown" checked />
+                  <span class="slider" aria-hidden="true"></span>
+                </label>
+              </div>
             </div>
 
             <div class="footer">
-              <span><strong>Tip: </strong>Turn off buttons you don’t use to keep the Portal clean.</span>
+              <span><strong>Tip: </strong>Turn off buttons you don't use to keep the Portal clean.</span>
             </div>
           </section>
         </div>

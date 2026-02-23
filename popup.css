@@ -178,6 +178,32 @@ body {
 
 .footer strong { color: var(--text); }
 
+.linkBtn {
+  background-color: #1a3a8a;
+  color: #ffffff;
+  border: none;
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.linkBtn:hover {
+  background-color: #0f2c6b;
+}
+
+.linkBtn:active {
+  transform: scale(0.97);
+}
+
+.linkBtn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(26, 58, 138, 0.25);
+}
+
 /* sr-only */
 .srOnly {
   position: absolute;

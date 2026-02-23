@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS = {
     p2cc: true,
     thirdYear: true,
   },
+  autoDropdown: true,
 };
 
 function normalizeSettings(raw) {
@@ -30,7 +31,10 @@ function normalizeSettings(raw) {
         : DEFAULT_SETTINGS.buttons.thirdYear,
   };
 
-  return { runMode, targetPage, buttons };
+  const autoDropdown =
+    typeof raw?.autoDropdown === "boolean" ? raw.autoDropdown : DEFAULT_SETTINGS.autoDropdown;
+
+  return { runMode, targetPage, buttons, autoDropdown };
 }
 
 async function loadSettings() {
@@ -130,6 +134,13 @@ async function copyToClipboardFromPopup(text) {
   }
 }
 
+
+const CHANGELOG_FILE_URL = "file:///I:/Apprentice's Scripts/Website/Changelog.html";
+
+document.getElementById("openChangelog")?.addEventListener("click", () => {
+  chrome.tabs.create({ url: CHANGELOG_FILE_URL });
+});
+
 // -------------------- Status helper --------------------
 function setStatus(msg, kind = "") {
   const el = document.getElementById("status");
@@ -161,6 +172,7 @@ async function initSettings() {
 
   const toggleP2cc = document.getElementById("toggle_p2cc");
   const toggle3rd = document.getElementById("toggle_3rdyear");
+  const toggleAutoDropdown = document.getElementById("toggle_autoDropdown");
 
   function applyTargetVisibility(runMode) {
     const show = runMode === "full";
@@ -177,6 +189,7 @@ async function initSettings() {
 
   if (toggleP2cc) toggleP2cc.checked = !!settings.buttons?.p2cc;
   if (toggle3rd) toggle3rd.checked = !!settings.buttons?.thirdYear;
+  if (toggleAutoDropdown) toggleAutoDropdown.checked = !!settings.autoDropdown;
 
   applyTargetVisibility(mode);
   updateSettingsTabPrimaryLabel(mode);
@@ -189,7 +202,7 @@ async function initSettings() {
       return;
     }
     const ok = await copyToClipboardFromPopup(claim);
-    setStatus(ok ? `Copied claim number: ${claim}` : "Couldn’t copy to clipboard.", ok ? "ok" : "err");
+    setStatus(ok ? `Copied claim number: ${claim}` : "Couldn't copy to clipboard.", ok ? "ok" : "err");
   }
 
   async function persistAll() {
@@ -202,6 +215,7 @@ async function initSettings() {
         p2cc: toggleP2cc ? !!toggleP2cc.checked : DEFAULT_SETTINGS.buttons.p2cc,
         thirdYear: toggle3rd ? !!toggle3rd.checked : DEFAULT_SETTINGS.buttons.thirdYear,
       },
+      autoDropdown: toggleAutoDropdown ? !!toggleAutoDropdown.checked : DEFAULT_SETTINGS.autoDropdown,
     });
   }
 
@@ -211,7 +225,7 @@ async function initSettings() {
         await persistAll();
       } catch (e) {
         console.error(e);
-        setStatus("Couldn’t save target page.", "err");
+        setStatus("Couldn't save target page.", "err");
       }
     });
   }
@@ -229,12 +243,12 @@ async function initSettings() {
         else setStatus("", "");
       } catch (e) {
         console.error(e);
-        setStatus("Couldn’t save settings.", "err");
+        setStatus("Couldn't save settings.", "err");
       }
     });
   });
 
-  [toggleP2cc, toggle3rd].forEach((t) => {
+  [toggleP2cc, toggle3rd, toggleAutoDropdown].forEach((t) => {
     if (!t) return;
     t.addEventListener("change", async () => {
       try {
@@ -242,7 +256,7 @@ async function initSettings() {
         setStatus("", "");
       } catch (e) {
         console.error(e);
-        setStatus("Couldn’t save settings.", "err");
+        setStatus("Couldn't save settings.", "err");
       }
     });
   });

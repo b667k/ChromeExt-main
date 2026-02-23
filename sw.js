@@ -415,3 +415,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 // Optional: attempt a best-effort flush on extension startup (won’t hurt if it fails)
 tryBackgroundFlushBestEffort();
+
+// -----------------------
+// CHANGELOG NOTIFICATION (on update)
+// -----------------------
+const CHANGELOG_URL = "I:\\Apprentice's Scripts\\Website\\Changelog.html";
+const LAST_SHOWN_VERSION_KEY = "last_shown_changelog_version";
+
+async function checkAndShowChangelog() {
+  try {
+    // Get current version from manifest
+    const manifest = chrome.runtime.getManifest();
+    const currentVersion = manifest.version;
+
+    // Get last shown version from storage
+    const data = await chrome.storage.local.get(LAST_SHOWN_VERSION_KEY);
+    const lastShownVersion = data[LAST_SHOWN_VERSION_KEY];
+
+    // If this is a new version, show the changelog
+    if (currentVersion && currentVersion !== lastShownVersion) {
+      log("New version detected:", currentVersion, "Previous:", lastShownVersion);
+      
+      // Open changelog in a new tab
+      await chrome.tabs.create({ url: CHANGELOG_URL, active: true });
+      
+      // Update the last shown version
+      await chrome.storage.local.set({ [LAST_SHOWN_VERSION_KEY]: currentVersion });
+      log("Changelog shown for version:", currentVersion);
+    } else {
+      log("No new version to show. Current:", currentVersion, "Last shown:", lastShownVersion);
+    }
+  } catch (e) {
+    warn("Failed to check/show changelog:", String(e?.message || e));
+  }
+}
+
+// Run changelog check on service worker startup
+checkAndShowChangelog();
