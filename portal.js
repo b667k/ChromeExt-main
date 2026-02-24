@@ -134,13 +134,43 @@
     section.style.display = anyEnabled ? "" : "none";
   }
 
+  function getClaimNumberFromClaimSection() {
+    // Find the "Claim Number:" label and get the adjacent value
+    // HTML structure:
+    // <p class="col-xs-3 text-right" style="font-weight: bold;">Claim Number:</p>
+    // <p class="col-xs-9 text-left">A00007469531</p>
+    const labels = Array.from(document.querySelectorAll("p"));
+    
+    for (const label of labels) {
+      const text = label?.innerText?.trim() || "";
+      if (text === "Claim Number:") {
+        // Get the next sibling element (should be the claim number value)
+        const nextSibling = label.nextElementSibling;
+        if (nextSibling) {
+          const claimNumber = nextSibling?.innerText?.trim() || "";
+          if (claimNumber && /^[A-Za-z]\d{11}$/.test(claimNumber)) {
+            return claimNumber;
+          }
+        }
+      }
+    }
+    return "";
+  }
+
   function getClaimNumberFromTaskDescription() {
+    // First try: get from #taskDescription (existing method)
     const el = document.querySelector("#taskDescription");
     const claimNumber = el?.innerText?.trim()?.split(" ")?.[0]?.trim() || "";
     if (claimNumber && /^[A-Za-z]\d{11}$/.test(claimNumber)) return claimNumber;
     const text = el?.innerText?.trim() || "";
     const m = text.match(/\b([A-Za-z]\d{11})\b/);
-    return m ? m[1] : "";
+    if (m) return m[1];
+
+    // Second try: get from Claim Number section (new fallback)
+    const claimFromSection = getClaimNumberFromClaimSection();
+    if (claimFromSection) return claimFromSection;
+
+    return "";
   }
 
   function getPolicyNumberFromTaskDescription() {

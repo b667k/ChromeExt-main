@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "CUW134 Autofill",
+  "version": "1.0.0",
+  "description": "Auto-fills CUW134 InfoPath field from URL parameter.",
+  "permissions": [],
+  "host_permissions": [
+    "http://erieshare/*",
+    "https://erieshare/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx*",
+        "https://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

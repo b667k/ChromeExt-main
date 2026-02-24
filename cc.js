@@ -1,6 +1,117 @@
 // cc.js - UPDATED: robust TargetPage matching + DEBUG URL logging
 // DEBUG: Added detailed URL and session state logging to diagnose timeout issues
 
+// CUW134 Form URL base
+const CUW134_URL_BASE = "http://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx";
+
+// -----------------------
+// CUW134: Get driver name from Loss Details
+// -----------------------
+
+/**
+ * Extract driver name from Loss Details page in ClaimCenter
+ * Looks for the Driver cell in the Vehicle Incidents list
+ */
+function getDriverNameFromLossDetails() {
+  // Try to find the driver name in Loss Details
+  // The HTML structure shows: id="ClaimLossDetails-...-EditableVehicleIncidentsLV-1-Driver"
+  
+  // Try the specific selector from the provided HTML
+  const driverEl = document.querySelector('[id*="EditableVehicleIncidentsLV"][id*="-Driver"]');
+  if (driverEl) {
+    const name = driverEl.textContent?.trim();
+    if (name) {
+      console.log("[cc.js] CUW134 - Found driver name:", name);
+      return name;
+    }
+  }
+  
+  // Fallback: try broader selectors
+  const selectors = [
+    'div[id*="Driver"][class*="TextValueWidget"]',
+    'div[id*="Driver"] .gw-value-readonly-wrapper',
+    '[id*="Driver"] .gw-vw--value',
+  ];
+  
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const name = el.textContent?.trim();
+      if (name && name.length > 0) {
+        console.log("[cc.js] CUW134 - Found driver name (fallback):", name);
+        return name;
+      }
+    }
+  }
+  
+  return null;
+}
+
+/**
+ * Get Loss Party value to determine if driver is the insured
+ */
+function getLossPartyFromLossDetails() {
+  // Try to find the Loss Party cell
+  const lossPartyEl = document.querySelector('[id*="EditableVehicleIncidentsLV"][id*="-LossParty"]');
+  if (lossPartyEl) {
+    const lossParty = lossPartyEl.textContent?.trim();
+    console.log("[cc.js] CUW134 - Found Loss Party:", lossParty);
+    return lossParty;
+  }
+  return null;
+}
+
+/**
+ * Build CUW134 URL with all parameters
+ * pubc6 = policy number (6 chars) - passed from CommercialAuto/Mainframe
+ * puurText41 = description text - passed from CommercialAuto/Mainframe  
+ * driverName = driver/insured name - from ClaimCenter Loss Details
+ * dolDate = date of loss - from ClaimCenter
+ */
+function buildCUW134Url(driverName, pubc6, puurText41, dolDate) {
+  const url = new URL(CUW134_URL_BASE);
+  url.searchParams.set("XsnLocation", "/sites/formsmgmt/CommlForms/CUW134/forms/template.xsn%3Fopenin=browser");
+  
+  if (pubc6) url.searchParams.set("x", pubc6);
+  if (driverName) url.searchParams.set("t4", driverName);
+  if (puurText41) url.searchParams.set("t3", puurText41);
+  if (dolDate) url.searchParams.set("t5", dolDate);
+  
+  return url.toString();
+}
+
+/**
+ * Open CUW134 form with driver name (in same tab)
+ */
+async function openCUW134Form() {
+  console.log("[cc.js] CUW134 - Opening CUW134 form...");
+  
+  const driverName = getDriverNameFromLossDetails();
+  const lossParty = getLossPartyFromLossDetails();
+  
+  // For now, use driver name - could be enhanced to check if loss party is "Insured's loss"
+  const insuredName = driverName;
+  
+  if (!insuredName) {
+    console.warn("[cc.js] CUW134 - Could not find driver name in Loss Details");
+    alert("Could not find driver name in Loss Details. Please ensure you are on the Loss Details page.");
+    return;
+  }
+  
+  // Build URL with just the driver name (t4 parameter)
+  // User can add other params manually if needed
+  const url = buildCUW134Url(insuredName, null, null, null);
+  
+  console.log("[cc.js] CUW134 - Opening URL:", url);
+  
+  // Open in SAME tab (not new tab)
+  window.location.href = url;
+}
+
+// -----------------------
+// END CUW134 FUNCTIONS
+// -----------------------
+
 async function robustClick(el) {
   if (!el) return;
   await waitUntilClickable();
@@ -546,37 +657,39 @@ async function runAutomation() {
     }
   }
 
-  // Strategy 3: Individual word match - match if ALL desired words are present in label
-  // This handles cases like "claim overview summary" matching "Overview"
-  if (!clicked) {
-    for (const lbl of labels) {
-      const labelText = normalizeLabel(lbl?.innerText);
-      if (!labelText) continue;
+  // Strategy 3: Individual word match - match if ALL desired words are present in the label
+// This handles cases like "claim overview summary" matching "Overview"
+if (!clicked) {
+  for (const lbl of labels) {
+    const labelText = normalizeLabel(lbl?.innerText);
+    if (!labelText) continue;
 
-      // Check if all desired words are found in the label
-      const allWordsFound = desiredWords.every((word) => labelText.includes(word));
+    // Check if all desired words are found in the label
+    const allWordsFound =
+      desiredWords.length > 0 &&
+      desiredWords.every((word) => labelText.includes(word));
 
-      if (allWordsFound && desiredWords.length > 0) {
-        console.log(
-          "[cc.js] Debug - Word match found:",
-          lbl.innerText,
-          "matched words:",
-          desiredWords
-        );
-        const clickable =
-          lbl.closest('a, button, [role="menuitem"]') ||
-          lbl.closest("li") ||
-          lbl.parentElement;
+    if (allWordsFound) {
+      console.log(
+        "[cc.js] Debug - Word match found:",
+        lbl.innerText,
+        "matched words:",
+        desiredWords
+      );
 
-        if (clickable) {
-          await robustClick(clickable);
-          clicked = true;
-        }
-        break;
+      const clickable =
+        lbl.closest('a, button, [role="menuitem"]') ||
+        lbl.closest("li") ||
+        lbl.parentElement;
+
+      if (clickable) {
+        await robustClick(clickable);
+        clicked = true;
       }
+      break;
     }
   }
-
+}
   // Strategy 4: Fuzzy match - match if at least one significant word matches
   // Filter out common words that aren't distinctive
   const significantWords = desiredWords.filter(
@@ -795,6 +908,20 @@ try {
         });
 
       // Return true to indicate we'll respond asynchronously
+      return true;
+    }
+
+    // Handle OPEN_CUW134 command - open CUW134 form with driver name
+    if (msg?.type === "OPEN_CUW134") {
+      console.log("[cc.js] Received OPEN_CUW134 command...");
+      
+      try {
+        openCUW134Form();
+        sendResponse({ ok: true });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+      
       return true;
     }
 
