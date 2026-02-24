@@ -1,23 +1,49 @@
-// cc.js - UPDATED: robust TargetPage matching + DEBUG URL logging
-// DEBUG: Added detailed URL and session state logging to diagnose timeout issues
+// cc.js
+// FULL FIX: carry x/t3/t5/openCUW134 from ClaimCenter URL -> navigate to Loss Details -> scrape driver -> open CUW134 (HTTP) with x/t3/t4/t5
+// Notes:
+// - Requires VBA to open ClaimCenter with &x=...&t3=...&t5=...&openCUW134=1
+// - Keeps SharePoint/FormServer base as HTTP (per your requirement)
+// - Uses a robust “wait for driver cell” gate instead of relying on ClaimLossDetails container IDs
 
-// CUW134 Form URL base
-const CUW134_URL_BASE = "http://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx";
+"use strict";
 
-// -----------------------
-// CUW134: Get driver name from Loss Details
-// -----------------------
+// ============================================================
+// CONFIG
+// ============================================================
 
-/**
- * Extract driver name from Loss Details page in ClaimCenter
- * Looks for the Driver cell in the Vehicle Incidents list
- */
+// CUW134 Form URL base (HTTP per requirement)
+const CUW134_URL_BASE =
+  "http://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx";
+
+// Target page key (from VBA)
+const TARGET_PAGE_LOSS_DETAILS = "loss_details";
+
+// ============================================================
+// CUW134 URL builder
+// ============================================================
+function buildCUW134Url(driverName, pubc6, puurText41, dolDate) {
+  const url = new URL(CUW134_URL_BASE);
+  url.searchParams.set(
+    "XsnLocation",
+    "/sites/formsmgmt/CommlForms/CUW134/forms/template.xsn%3Fopenin=browser"
+  );
+
+  if (pubc6) url.searchParams.set("x", pubc6);
+  if (driverName) url.searchParams.set("t4", driverName);
+  if (puurText41) url.searchParams.set("t3", puurText41);
+  if (dolDate) url.searchParams.set("t5", dolDate);
+
+  return url.toString();
+}
+
+// ============================================================
+// Loss Details scraping
+// ============================================================
 function getDriverNameFromLossDetails() {
-  // Try to find the driver name in Loss Details
-  // The HTML structure shows: id="ClaimLossDetails-...-EditableVehicleIncidentsLV-1-Driver"
-  
-  // Try the specific selector from the provided HTML
-  const driverEl = document.querySelector('[id*="EditableVehicleIncidentsLV"][id*="-Driver"]');
+  // Primary selector (Vehicle Incidents LV Driver cell)
+  const driverEl = document.querySelector(
+    '[id*="EditableVehicleIncidentsLV"][id*="-Driver"]'
+  );
   if (driverEl) {
     const name = driverEl.textContent?.trim();
     if (name) {
@@ -25,34 +51,32 @@ function getDriverNameFromLossDetails() {
       return name;
     }
   }
-  
-  // Fallback: try broader selectors
+
+  // Fallback selectors
   const selectors = [
     'div[id*="Driver"][class*="TextValueWidget"]',
     'div[id*="Driver"] .gw-value-readonly-wrapper',
     '[id*="Driver"] .gw-vw--value',
   ];
-  
+
   for (const sel of selectors) {
     const el = document.querySelector(sel);
     if (el) {
       const name = el.textContent?.trim();
-      if (name && name.length > 0) {
+      if (name) {
         console.log("[cc.js] CUW134 - Found driver name (fallback):", name);
         return name;
       }
     }
   }
-  
+
   return null;
 }
 
-/**
- * Get Loss Party value to determine if driver is the insured
- */
 function getLossPartyFromLossDetails() {
-  // Try to find the Loss Party cell
-  const lossPartyEl = document.querySelector('[id*="EditableVehicleIncidentsLV"][id*="-LossParty"]');
+  const lossPartyEl = document.querySelector(
+    '[id*="EditableVehicleIncidentsLV"][id*="-LossParty"]'
+  );
   if (lossPartyEl) {
     const lossParty = lossPartyEl.textContent?.trim();
     console.log("[cc.js] CUW134 - Found Loss Party:", lossParty);
@@ -61,69 +85,71 @@ function getLossPartyFromLossDetails() {
   return null;
 }
 
-/**
- * Build CUW134 URL with all parameters
- * pubc6 = policy number (6 chars) - passed from CommercialAuto/Mainframe
- * puurText41 = description text - passed from CommercialAuto/Mainframe  
- * driverName = driver/insured name - from ClaimCenter Loss Details
- * dolDate = date of loss - from ClaimCenter
- */
-function buildCUW134Url(driverName, pubc6, puurText41, dolDate) {
-  const url = new URL(CUW134_URL_BASE);
-  url.searchParams.set("XsnLocation", "/sites/formsmgmt/CommlForms/CUW134/forms/template.xsn%3Fopenin=browser");
-  
-  if (pubc6) url.searchParams.set("x", pubc6);
-  if (driverName) url.searchParams.set("t4", driverName);
-  if (puurText41) url.searchParams.set("t3", puurText41);
-  if (dolDate) url.searchParams.set("t5", dolDate);
-  
-  return url.toString();
+// ============================================================
+// Param handling (x/t3/t5 + openCUW134) from ClaimCenter URL
+// ============================================================
+function getCUW134ParamsFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  return {
+    pubc6: p.get("x") || null,
+    t3: p.get("t3") || null,
+    t5: p.get("t5") || null,
+    open: (p.get("openCUW134") || "").toLowerCase() === "1",
+  };
 }
 
-/**
- * Open CUW134 form with driver name (in same tab)
- */
+function stashCUW134Params() {
+  const params = getCUW134ParamsFromUrl();
+  globalThis._cuw134Params = params;
+  return params;
+}
+
+function getStashedOrUrlParams() {
+  return globalThis._cuw134Params || getCUW134ParamsFromUrl();
+}
+
+// ============================================================
+// CUW134 open (same tab)
+// ============================================================
 async function openCUW134Form() {
-  console.log("[cc.js] CUW134 - Opening CUW134 form...");
-  
+  console.log("[cc.js] CUW134 - Attempting to open CUW134...");
+
   const driverName = getDriverNameFromLossDetails();
   const lossParty = getLossPartyFromLossDetails();
-  
-  // For now, use driver name - could be enhanced to check if loss party is "Insured's loss"
+
+  // You can enhance this later if you need insured vs driver based on lossParty
   const insuredName = driverName;
-  
+
   if (!insuredName) {
-    console.warn("[cc.js] CUW134 - Could not find driver name in Loss Details");
-    alert("Could not find driver name in Loss Details. Please ensure you are on the Loss Details page.");
-    return;
+    console.warn("[cc.js] CUW134 - Could not find driver name in Loss Details.");
+    alert(
+      "Could not find driver name in Loss Details. Please ensure you are on the Loss Details page."
+    );
+    return false;
   }
-  
-  // Build URL with just the driver name (t4 parameter)
-  // User can add other params manually if needed
-  const url = buildCUW134Url(insuredName, null, null, null);
-  
+
+  const { pubc6, t3, t5 } = getStashedOrUrlParams();
+
+  console.log("[cc.js] CUW134 - Using params:", { pubc6, t3, t5, lossParty });
+
+  const url = buildCUW134Url(insuredName, pubc6, t3, t5);
   console.log("[cc.js] CUW134 - Opening URL:", url);
-  
-  // Open in SAME tab (not new tab)
+
+  // Open in SAME tab
   window.location.href = url;
+  return true;
 }
 
-// -----------------------
-// END CUW134 FUNCTIONS
-// -----------------------
-
+// ============================================================
+// Generic helpers
+// ============================================================
 async function robustClick(el) {
   if (!el) return;
   await waitUntilClickable();
   const rect = el.getBoundingClientRect();
   const cx = Math.floor(rect.left + rect.width / 2);
   const cy = Math.floor(rect.top + rect.height / 2);
-  const opts = {
-    bubbles: true,
-    cancelable: true,
-    clientX: cx,
-    clientY: cy,
-  };
+  const opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
   el.focus();
   el.dispatchEvent(new PointerEvent("pointerdown", opts));
   el.dispatchEvent(new MouseEvent("mousedown", opts));
@@ -135,28 +161,25 @@ async function robustClick(el) {
 
 function waitForElm(selector) {
   return new Promise((resolve) => {
-    if (document.querySelector(selector)) {
-      return resolve(document.querySelector(selector));
-    }
+    const now = document.querySelector(selector);
+    if (now) return resolve(now);
+
     const observer = new MutationObserver(() => {
-      if (document.querySelector(selector)) {
+      const el = document.querySelector(selector);
+      if (el) {
         observer.disconnect();
-        resolve(document.querySelector(selector));
+        resolve(el);
       }
     });
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
   });
 }
 
 async function waitForText(selector, expectedText, timeoutMs = 10000) {
   const checkNow = () => {
     const el = document.querySelector(selector);
-    if (el && (el.textContent || "").includes(expectedText)) {
-      return el;
-    }
+    if (el && (el.textContent || "").includes(expectedText)) return el;
     return null;
   };
 
@@ -209,6 +232,24 @@ function insertText(str, input = document.activeElement) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Robust “wait for a selector” loop with timeout (used for Loss Details readiness)
+async function waitForAny(selector, timeoutMs = 25000, pollMs = 300) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = document.querySelector(selector);
+    if (el) return el;
+    await sleep(pollMs);
+  }
+  return null;
+}
+
+// ============================================================
+// Settings (runMode)
+// ============================================================
 const SETTINGS_KEY = "settings_v1";
 const DEFAULT_SETTINGS = { runMode: "full" }; // full | claim_only | copy_only
 
@@ -221,21 +262,23 @@ async function getRunMode() {
   }
 }
 
+// ============================================================
+// Navigation helpers
+// ============================================================
 async function goToSearchScreen() {
   const SSS_SEARCH_CLAIMS_TITLEBAR =
     "#SimpleClaimSearch-SimpleClaimSearchScreen-ttlBar";
-  let el = document.querySelector(SSS_SEARCH_CLAIMS_TITLEBAR);
-  if (!el) {
-    const SSS_SEARCH_TAB_BTN = "#TabBar-SearchTab div";
-    let search_tab_btn =
-      document.querySelector(SSS_SEARCH_TAB_BTN) ||
-      (await waitForElm(SSS_SEARCH_TAB_BTN));
-    await robustClick(search_tab_btn);
-  }
+
+  const el = document.querySelector(SSS_SEARCH_CLAIMS_TITLEBAR);
+  if (el) return;
+
+  const SSS_SEARCH_TAB_BTN = "#TabBar-SearchTab div";
+  const search_tab_btn =
+    document.querySelector(SSS_SEARCH_TAB_BTN) ||
+    (await waitForElm(SSS_SEARCH_TAB_BTN));
+  await robustClick(search_tab_btn);
 }
 
-// Normalize strings so URL params like "loss details" or "loss_details"
-// match UI labels like "Loss Details".
 function normalizeLabel(s) {
   return String(s || "")
     .trim()
@@ -244,9 +287,9 @@ function normalizeLabel(s) {
     .replace(/\s+/g, " ");
 }
 
-// -----------------------
+// ============================================================
 // DEBUG: Log current URL and page state
-// -----------------------
+// ============================================================
 function debugLogPageState() {
   const url = window.location.href;
   const pathname = window.location.pathname;
@@ -256,36 +299,23 @@ function debugLogPageState() {
   console.log("Full URL:", url);
   console.log("Pathname:", pathname);
   console.log("Search params:", search);
+  console.log("Stashed CUW134 params:", globalThis._cuw134Params || null);
   console.log("=============================");
 
-  // Log cookies for this domain
   try {
     const cookies = document.cookie;
     console.log(
       "[cc.js] DEBUG: Cookies present:",
       cookies.length > 0 ? "YES" : "NO"
     );
-    if (cookies.length > 0) {
-      // Show cookie names (not values) for debugging
-      const cookieNames = cookies
-        .split(";")
-        .map((c) => c.trim().split("=")[0]);
-      console.log("[cc.js] DEBUG: Cookie names:", cookieNames.join(", "));
-    }
   } catch (e) {
     console.log("[cc.js] DEBUG: Could not read cookies:", e.message);
   }
 
-  // Log document ready state
   console.log("[cc.js] DEBUG: document.readyState:", document.readyState);
   console.log("[cc.js] DEBUG: document.title:", document.title);
 
-  // Log body content info
   if (document.body) {
-    console.log(
-      "[cc.js] DEBUG: body.childElementCount:",
-      document.body.childElementCount
-    );
     console.log(
       "[cc.js] DEBUG: body.innerText (first 200 chars):",
       (document.body.innerText || "").substring(0, 200)
@@ -294,24 +324,16 @@ function debugLogPageState() {
   console.log("=================================");
 }
 
-// -----------------------
-// SESSION CHECK - Check session/cookies instead of login page
-// -----------------------
-
-/**
- * Check if the session is valid by examining the page state
- * Returns true if session appears valid, false if session seems invalid/redirected
- */
+// ============================================================
+// Session checks (kept from your version)
+// ============================================================
 function isSessionInvalid() {
   const url = window.location.href.toLowerCase();
   const pathname = window.location.pathname.toLowerCase();
 
-  // DEBUG: Log what we're checking
   console.log("[cc.js] DEBUG: Checking session validity...");
   console.log("[cc.js] DEBUG: Current URL:", window.location.href);
-  console.log("[cc.js] DEBUG: Current pathname:", pathname);
 
-  // Check 1: URL redirects to login/auth
   if (
     url.includes("login") ||
     url.includes("auth") ||
@@ -322,22 +344,16 @@ function isSessionInvalid() {
     return true;
   }
 
-  // Check 2: URL has unexpected paths (like /login.do, /session expired, etc)
   if (
     pathname.includes("session") ||
     pathname.includes("expired") ||
     pathname.endsWith("/login")
   ) {
-    console.log(
-      "[cc.js] DEBUG: Session INVALID - pathname indicates session issue"
-    );
+    console.log("[cc.js] DEBUG: Session INVALID - pathname indicates session issue");
     return true;
   }
 
-  // Check 3: Look for common session-timeout indicators in the page
   const pageText = (document.body?.innerText || "").toLowerCase();
-
-  // Common timeout/session expired messages
   const timeoutIndicators = [
     "session expired",
     "your session has expired",
@@ -355,40 +371,12 @@ function isSessionInvalid() {
     }
   }
 
-  // Check 4: No claim-related elements found (suggests not on expected page)
-  // Wait for Claim menu or search to be present
-  const hasClaimMenu =
-    document.querySelector("#Claim-MenuLinks") ||
-    document.querySelector("[id*='ClaimScreen']");
-  const hasSearchScreen =
-    document.querySelector("#SimpleClaimSearch-SimpleClaimSearchScreen-ttlBar") ||
-    document.querySelector("#TabBar-SearchTab");
-
-  console.log("[cc.js] DEBUG: Has Claim menu:", !!hasClaimMenu);
-  console.log("[cc.js] DEBUG: Has Search screen:", !!hasSearchScreen);
-
-  // If we have neither, might be on an unexpected page
-  if (!hasClaimMenu && !hasSearchScreen && document.readyState === "complete") {
-    // Give it a moment - could be still loading
-    console.log(
-      "[cc.js] DEBUG: WARNING - No Claim menu or Search screen found"
-    );
-    // Don't immediately return invalid - could be still loading
-  }
-
   console.log("[cc.js] DEBUG: Session appears VALID");
   return false;
 }
 
-/**
- * Wait for session to become valid (wait for redirect after login or page load)
- * Returns a promise that resolves when session is valid
- */
 async function waitForValidSession(timeoutMs = 300000) {
-  // 5 minute timeout
-  console.log(
-    "[cc.js] Session - Session may be invalid, waiting for it to become valid..."
-  );
+  console.log("[cc.js] Session - Waiting for session to become valid...");
 
   return new Promise((resolve, reject) => {
     let timeoutId = null;
@@ -397,119 +385,76 @@ async function waitForValidSession(timeoutMs = 300000) {
 
     const checkValid = () => {
       if (!isSessionInvalid()) {
-        console.log(
-          "[cc.js] Session - Session is now VALID, proceeding with automation"
-        );
-
-        // Give the page a moment to load the content
+        console.log("[cc.js] Session - Session is now VALID");
         setTimeout(() => {
           if (timeoutId) clearTimeout(timeoutId);
           if (observer) observer.disconnect();
           if (urlCheckInterval) clearInterval(urlCheckInterval);
           resolve(true);
         }, 1500);
-
         return true;
       }
       return false;
     };
 
-    // Check immediately in case session is already valid
     if (checkValid()) return;
 
-    // Set up timeout
     timeoutId = setTimeout(() => {
       if (observer) observer.disconnect();
       if (urlCheckInterval) clearInterval(urlCheckInterval);
-      console.warn("[cc.js] Session - Session wait timeout after 5 minutes");
-      reject(
-        new Error(
-          "Session timeout - session did not become valid within 5 minutes"
-        )
-      );
+      reject(new Error("Session timeout - did not become valid within 5 minutes"));
     }, timeoutMs);
 
-    // Watch for DOM changes that indicate session became valid
-    observer = new MutationObserver((mutations) => {
-      setTimeout(() => {
-        checkValid();
-      }, 500);
-    });
-
+    observer = new MutationObserver(() => setTimeout(checkValid, 500));
     try {
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["class", "id"],
-      });
-    } catch (e) {
-      // Body might not be ready yet
-      console.log("[cc.js] DEBUG: Could not observe body, trying window...");
-    }
+      observer.observe(document.body, { childList: true, subtree: true });
+    } catch {}
 
-    // Also check on URL changes (SPAs may change URL without DOM mutations)
     let lastUrl = window.location.href;
     urlCheckInterval = setInterval(() => {
       if (window.location.href !== lastUrl) {
-        console.log(
-          "[cc.js] DEBUG: URL changed from:",
-          lastUrl,
-          "to:",
-          window.location.href
-        );
         lastUrl = window.location.href;
         checkValid();
       }
     }, 1000);
-
-    // Clean up function
-    const cleanup = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (observer) observer.disconnect();
-      if (urlCheckInterval) clearInterval(urlCheckInterval);
-    };
-
-    // Override resolve to clean up
-    const originalResolve = resolve;
-    resolve = (val) => {
-      cleanup();
-      originalResolve(val);
-    };
   });
 }
 
-/**
- * Main session check function - call this before running any automation
- * Returns true if session is valid, waits for session if needed
- */
 async function ensureSession() {
-  // Quick check first - if session is valid, we're good
-  if (!isSessionInvalid()) {
-    console.log("[cc.js] Session - Already valid");
-    return true;
-  }
-
-  // Session seems invalid - wait for it to become valid
+  if (!isSessionInvalid()) return true;
   try {
     await waitForValidSession();
     return true;
-  } catch (error) {
-    console.error("[cc.js] Session - Failed:", error.message);
+  } catch (e) {
+    console.error("[cc.js] Session - Failed:", e.message);
     return false;
   }
 }
 
-/**
- * Main automation runner with session handling and auto-retry
- * This function contains all the automation logic and handles session issues
- */
+// ============================================================
+// MAIN AUTOMATION
+// ============================================================
 async function runAutomation() {
-  //
-  // NAVIGATING TO CLAIM.
-  //
+  // Stash CUW134 params early (before any URL cleanup)
+  const cuwParams = stashCUW134Params();
 
-  // SELECTOR CONSTANTS
+  const PARAMS = new URLSearchParams(window.location.search);
+
+  // Claim number may come in multiple names
+  let TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
+  if (!TARGET_CLAIM && globalThis._claimFromMessage) TARGET_CLAIM = globalThis._claimFromMessage;
+  if (!TARGET_CLAIM) return;
+
+  const runMode = await getRunMode();
+  if (runMode === "copy_only") {
+    history.pushState({}, "", window.location.origin + window.location.pathname);
+    return;
+  }
+
+  // Go to search screen
+  await goToSearchScreen();
+
+  // Search and open claim
   const SSS_CLAIM_INPUT =
     'input[name="SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchDV-ClaimNumber"]';
   const SSS_CLAIM_SEARCH_BTN =
@@ -517,113 +462,61 @@ async function runAutomation() {
   const SSS_RESULT_BUTTON =
     "#SimpleClaimSearch-SimpleClaimSearchScreen-SimpleClaimSearchResultsLV-0-ClaimNumber_button";
 
-  // Extract URL params.
-  const PARAMS = new URLSearchParams(window.location.search);
-
-  // UPDATED: allow fallback to claim passed in via RUN_NOW message
-  let TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
-  if (!TARGET_CLAIM && globalThis._claimFromMessage) {
-    TARGET_CLAIM = globalThis._claimFromMessage;
-  }
-
-  if (!TARGET_CLAIM) return;
-
-  const runMode = await getRunMode();
-
-  // copy_only: keep opening ClaimCenter tab, but do not run any CC automation.
-  if (runMode === "copy_only") {
-    history.pushState({}, "", window.location.origin + window.location.pathname);
-    return;
-  }
-
-  // Navigate to the search screen.
-  await goToSearchScreen();
-
-  // Enter the claim number into the search box.
   const claim_input = await waitForElm(SSS_CLAIM_INPUT);
   await robustClick(claim_input);
   insertText(TARGET_CLAIM);
 
-  // Click the search button.
   const claim_search_btn = await waitForElm(SSS_CLAIM_SEARCH_BTN);
   await robustClick(claim_search_btn);
 
-  // claim_only: search claim but do not click row0/result.
   if (runMode === "claim_only") {
     history.pushState({}, "", window.location.origin + window.location.pathname);
     return;
   }
 
-  // Click on the resulting claim.
   let result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
   if (!result_claim_btn) {
-    // First-run fallback: trigger search one more time internally so user doesn't need to click again.
     await robustClick(claim_search_btn);
     result_claim_btn = await waitForText(SSS_RESULT_BUTTON, TARGET_CLAIM, 6000);
   }
-  if (!result_claim_btn) {
-    result_claim_btn = await waitForElm(SSS_RESULT_BUTTON);
-  }
+  if (!result_claim_btn) result_claim_btn = await waitForElm(SSS_RESULT_BUTTON);
   await robustClick(result_claim_btn);
 
-  //
-  // NAVIGATING TO PAGE IN CLAIM.
-  //
-
-  // UPDATED: allow fallback to targetPage passed in via RUN_NOW message
+  // Target page (Loss Details)
   let TARGET_PAGE_RAW = PARAMS.get("TargetPage");
   if (!TARGET_PAGE_RAW && globalThis._targetPageFromMessage) {
     TARGET_PAGE_RAW = globalThis._targetPageFromMessage;
   }
-
   if (!TARGET_PAGE_RAW) {
-    // Reset URL.
     history.pushState({}, "", window.location.origin + window.location.pathname);
     return;
   }
 
   const desired = normalizeLabel(TARGET_PAGE_RAW);
-  const desiredWords = desired.split(" ").filter((w) => w.length > 0);
+  const desiredWords = desired.split(" ").filter(Boolean);
+
+  // Open left menu item
   const CS_MENU_LINKS = "#Claim-MenuLinks";
   const menu_links_container = await waitForElm(CS_MENU_LINKS);
 
-  // Find all labels under the menu container - also try additional selectors
-  // to be more robust across different ClaimCenter versions
   const labels = Array.from(
     menu_links_container.querySelectorAll(
       "div.gw-label, span.gw-label, a.gw-label, li.gw-menu-item, a[role='menuitem'], li a"
     )
   );
 
-  // Debug: log all available labels for troubleshooting
-  console.log(
-    "[cc.js] Debug - TargetPage sought:",
-    TARGET_PAGE_RAW,
-    "-> normalized:",
-    desired,
-    "-> words:",
-    desiredWords
-  );
-  console.log(
-    "[cc.js] Debug - Found labels:",
-    labels.map((l) => l.innerText?.trim()).filter(Boolean)
-  );
+  console.log("[cc.js] Debug - TargetPage:", TARGET_PAGE_RAW, "normalized:", desired);
 
   let clicked = false;
 
-  // Strategy 1: Exact match (original behavior)
+  // Strategy 1: exact
   for (const lbl of labels) {
     const labelText = normalizeLabel(lbl?.innerText);
-    if (!labelText) continue;
-
-    if (labelText === desired) {
-      console.log("[cc.js] Debug - Exact match found:", lbl.innerText);
-      // Click nearest meaningful clickable wrapper
+    if (labelText && labelText === desired) {
       const clickable =
         lbl.closest('a, button, [role="menuitem"]') ||
         lbl.closest("li") ||
         lbl.parentElement;
-
       if (clickable) {
         await robustClick(clickable);
         clicked = true;
@@ -632,22 +525,15 @@ async function runAutomation() {
     }
   }
 
-  // Strategy 2: Partial match - if label contains the full desired text
+  // Strategy 2: contains
   if (!clicked) {
     for (const lbl of labels) {
       const labelText = normalizeLabel(lbl?.innerText);
-      if (!labelText) continue;
-
-      if (labelText.includes(desired)) {
-        console.log(
-          "[cc.js] Debug - Partial match (contains) found:",
-          lbl.innerText
-        );
+      if (labelText && labelText.includes(desired)) {
         const clickable =
           lbl.closest('a, button, [role="menuitem"]') ||
           lbl.closest("li") ||
           lbl.parentElement;
-
         if (clickable) {
           await robustClick(clickable);
           clicked = true;
@@ -657,65 +543,20 @@ async function runAutomation() {
     }
   }
 
-  // Strategy 3: Individual word match - match if ALL desired words are present in the label
-// This handles cases like "claim overview summary" matching "Overview"
-if (!clicked) {
-  for (const lbl of labels) {
-    const labelText = normalizeLabel(lbl?.innerText);
-    if (!labelText) continue;
-
-    // Check if all desired words are found in the label
-    const allWordsFound =
-      desiredWords.length > 0 &&
-      desiredWords.every((word) => labelText.includes(word));
-
-    if (allWordsFound) {
-      console.log(
-        "[cc.js] Debug - Word match found:",
-        lbl.innerText,
-        "matched words:",
-        desiredWords
-      );
-
-      const clickable =
-        lbl.closest('a, button, [role="menuitem"]') ||
-        lbl.closest("li") ||
-        lbl.parentElement;
-
-      if (clickable) {
-        await robustClick(clickable);
-        clicked = true;
-      }
-      break;
-    }
-  }
-}
-  // Strategy 4: Fuzzy match - match if at least one significant word matches
-  // Filter out common words that aren't distinctive
-  const significantWords = desiredWords.filter(
-    (w) => w.length > 3 && !["and", "the", "for", "with"].includes(w)
-  );
-
-  if (!clicked && significantWords.length > 0) {
+  // Strategy 3: all words
+  if (!clicked) {
     for (const lbl of labels) {
       const labelText = normalizeLabel(lbl?.innerText);
       if (!labelText) continue;
 
-      // Check if at least one significant word matches
-      const anyWordFound = significantWords.some((word) => labelText.includes(word));
+      const allWordsFound =
+        desiredWords.length > 0 && desiredWords.every((w) => labelText.includes(w));
 
-      if (anyWordFound) {
-        console.log(
-          "[cc.js] Debug - Fuzzy match found:",
-          lbl.innerText,
-          "matched significant words:",
-          significantWords
-        );
+      if (allWordsFound) {
         const clickable =
           lbl.closest('a, button, [role="menuitem"]') ||
           lbl.closest("li") ||
           lbl.parentElement;
-
         if (clickable) {
           await robustClick(clickable);
           clicked = true;
@@ -725,203 +566,159 @@ if (!clicked) {
     }
   }
 
-  // Reset URL (always)
-  history.pushState({}, "", window.location.origin + window.location.pathname);
-
-  // Optional debug
+  // Strategy 4: fuzzy significant word
   if (!clicked) {
-    console.warn(
-      "[cc.js] TargetPage not found:",
-      TARGET_PAGE_RAW,
-      "(normalized:",
-      desired,
-      ")"
+    const significantWords = desiredWords.filter(
+      (w) => w.length > 3 && !["and", "the", "for", "with"].includes(w)
     );
-  }
-}
+    for (const lbl of labels) {
+      const labelText = normalizeLabel(lbl?.innerText);
+      if (!labelText) continue;
 
-/**
- * Watch for session refresh (page reload due to session expiry)
- * Returns a promise that resolves when the page has re-authenticated
- */
-function watchForSessionRefresh(initialUrl, timeoutMs = 60000) {
-  return new Promise((resolve, reject) => {
-    let timeoutId = setTimeout(() => {
-      observer.disconnect();
-      reject(new Error("Session refresh timeout"));
-    }, timeoutMs);
-
-    const observer = new MutationObserver((mutations) => {
-      // Check if the page has reloaded or redirected
-      if (window.location.href !== initialUrl) {
-        // Page URL changed - could be session refresh
-        console.log(
-          "[cc.js] Session - Detected URL change, waiting for stabilization..."
-        );
-
-        // Wait a bit for the new page to settle
-        setTimeout(() => {
-          clearTimeout(timeoutId);
-          observer.disconnect();
-          resolve(true);
-        }, 2000);
+      const anyFound = significantWords.some((w) => labelText.includes(w));
+      if (anyFound) {
+        const clickable =
+          lbl.closest('a, button, [role="menuitem"]') ||
+          lbl.closest("li") ||
+          lbl.parentElement;
+        if (clickable) {
+          await robustClick(clickable);
+          clicked = true;
+        }
+        break;
       }
-    });
+    }
+  }
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  });
+  if (!clicked) {
+    console.warn("[cc.js] TargetPage not found:", TARGET_PAGE_RAW);
+    history.pushState({}, "", window.location.origin + window.location.pathname);
+    return;
+  }
+
+  // ============================================================
+  // KEY FIX: if openCUW134=1, wait for Loss Details driver cell then open CUW134
+  // ============================================================
+  const shouldOpen = !!cuwParams.open;
+  const isLossDetails = normalizeLabel(TARGET_PAGE_RAW) === TARGET_PAGE_LOSS_DETAILS;
+
+  if (shouldOpen && isLossDetails) {
+    console.log("[cc.js] CUW134 - openCUW134=1 detected. Waiting for Driver cell...");
+
+    const driverCell = await waitForAny(
+      '[id*="EditableVehicleIncidentsLV"][id*="-Driver"]',
+      30000
+    );
+
+    if (!driverCell) {
+      console.warn("[cc.js] CUW134 - Driver cell not found after navigation. Aborting.");
+      return;
+    }
+
+    // Give UI a beat to populate text
+    await sleep(800);
+
+    await openCUW134Form();
+    return;
+  }
+
+  // Clean URL (only if we didn't redirect away)
+  history.pushState({}, "", window.location.origin + window.location.pathname);
 }
 
-/**
- * Run automation with session handling and auto-retry
- * Handles session expiry by detecting page reloads and waiting for re-authentication
- */
+// ============================================================
+// Runner with retries
+// ============================================================
 async function runAutomationWithSessionHandling() {
   const MAX_RETRIES = 3;
   const RETRY_DELAY_MS = 3000;
 
-  let lastError = null;
-
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      console.log(
-        `[cc.js] Session - Automation attempt ${attempt} of ${MAX_RETRIES}`
-      );
-
-      // DEBUG: Log page state at start of each attempt
+      console.log(`[cc.js] Attempt ${attempt}/${MAX_RETRIES}`);
       debugLogPageState();
 
-      // Capture URL before automation
-      const urlBefore = window.location.href;
+      const ok = await ensureSession();
+      if (!ok) throw new Error("Session validation failed");
 
-      // Check and ensure session is valid
-      const sessionOk = await ensureSession();
-      if (!sessionOk) {
-        console.warn("[cc.js] Session - Failed to establish valid session");
-        lastError = new Error("Session validation failed");
+      await runAutomation();
+      console.log("[cc.js] Automation completed.");
+      return true;
+    } catch (e) {
+      console.warn(`[cc.js] Attempt ${attempt} failed:`, e.message);
+
+      const retryable =
+        /session|login|auth|timeout|Cannot read properties|Failed to find/i.test(
+          String(e.message || "")
+        );
+
+      if (retryable && attempt < MAX_RETRIES) {
+        await sleep(RETRY_DELAY_MS);
         continue;
       }
-
-      // Run the automation
-      await runAutomation();
-
-      // If we get here, automation completed successfully
-      console.log("[cc.js] Session - Automation completed successfully");
-      return true;
-    } catch (error) {
-      lastError = error;
-      console.warn(
-        `[cc.js] Session - Automation attempt ${attempt} failed:`,
-        error.message
-      );
-
-      // Check if this might be a session-related error
-      const isSessionError =
-        error.message?.includes("session") ||
-        error.message?.includes("login") ||
-        error.message?.includes("auth") ||
-        error.message?.includes("timeout") ||
-        error.message?.includes("Failed to find") ||
-        error.message?.includes("Cannot read properties");
-
-      if (isSessionError && attempt < MAX_RETRIES) {
-        console.log(`[cc.js] Session - Retrying after ${RETRY_DELAY_MS}ms...`);
-        await sleep(RETRY_DELAY_MS);
-
-        // Check if page has refreshed (session was reset)
-        try {
-          await watchForSessionRefresh(window.location.href, 30000);
-          console.log("[cc.js] Session - Page refreshed, re-establishing session...");
-        } catch (refreshError) {
-          console.warn(
-            "[cc.js] Session - No page refresh detected, retrying anyway"
-          );
-        }
-      }
+      return false;
     }
   }
-
-  // All retries exhausted
-  console.error("[cc.js] Session - All automation attempts failed:", lastError?.message);
   return false;
 }
 
-// Helper sleep function
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Main IIFE entry point
+// ============================================================
+// IIFE entry point
+// ============================================================
 (async () => {
-  // Check if this is a process URL (has automation request)
   const PARAMS = new URLSearchParams(window.location.search);
   const TARGET_CLAIM = PARAMS.get("TargetClaim") || PARAMS.get("claimNumber");
 
-  // Only run automation if there's a target claim
   if (!TARGET_CLAIM) return;
 
-  // DEBUG: Log initial page state
-  console.log("[cc.js] DEBUG: Content script loaded for claim:", TARGET_CLAIM);
-  debugLogPageState();
+  console.log("[cc.js] Loaded for claim:", TARGET_CLAIM);
 
-  // Run with session handling and auto-retry
+  // Stash params ASAP so even if URL gets cleaned later we keep x/t3/t5/open
+  stashCUW134Params();
+
   await runAutomationWithSessionHandling();
 })();
 
-// Message listener for service worker commands
-// This handles RUN_NOW messages from the service worker
+// ============================================================
+// Message listener (RUN_NOW / OPEN_CUW134)
+// ============================================================
 try {
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    // Handle ping from service worker to check if content script is alive
     if (msg?.type === "PING_TM") {
       sendResponse({ ok: true, process: true });
       return true;
     }
 
-    // Handle RUN_NOW command - service worker tells us to run automation
     if (msg?.type === "RUN_NOW") {
-      console.log("[cc.js] Received RUN_NOW command, starting automation...");
+      console.log("[cc.js] RUN_NOW received.");
 
-      // NEW: Pull optional claim + targetPage off the message and store globally
-      if (msg.claim) {
-        console.log("[cc.js] Using claim from message:", msg.claim);
-        globalThis._claimFromMessage = msg.claim;
+      if (msg.claim) globalThis._claimFromMessage = msg.claim;
+      if (msg.targetPage) globalThis._targetPageFromMessage = msg.targetPage;
+
+      // Allow service worker to pass CUW params too (optional)
+      if (msg.x || msg.t3 || msg.t5 || msg.openCUW134) {
+        globalThis._cuw134Params = {
+          pubc6: msg.x || null,
+          t3: msg.t3 || null,
+          t5: msg.t5 || null,
+          open: String(msg.openCUW134 || "0") === "1",
+        };
+      } else {
+        stashCUW134Params();
       }
-      if (msg.targetPage) {
-        console.log("[cc.js] Using targetPage from message:", msg.targetPage);
-        globalThis._targetPageFromMessage = msg.targetPage;
-      }
 
-      // DEBUG: Log page state when RUN_NOW is received
-      debugLogPageState();
-
-      // Run automation with session handling
       runAutomationWithSessionHandling()
-        .then((result) => {
-          sendResponse({ ok: true, result });
-        })
-        .catch((err) => {
-          sendResponse({ ok: false, error: err.message });
-        });
+        .then((result) => sendResponse({ ok: true, result }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
 
-      // Return true to indicate we'll respond asynchronously
       return true;
     }
 
-    // Handle OPEN_CUW134 command - open CUW134 form with driver name
     if (msg?.type === "OPEN_CUW134") {
-      console.log("[cc.js] Received OPEN_CUW134 command...");
-      
-      try {
-        openCUW134Form();
-        sendResponse({ ok: true });
-      } catch (err) {
-        sendResponse({ ok: false, error: err.message });
-      }
-      
+      console.log("[cc.js] OPEN_CUW134 received.");
+      openCUW134Form()
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }
 

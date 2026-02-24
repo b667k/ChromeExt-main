@@ -26,7 +26,8 @@
   "host_permissions": [
     "http://erieweb/*",
     "https://erieweb/*",
-    "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/*"
+    "https://cc-prod-gwcpprod.erie.delta4-andromeda.guidewire.net/*",
+    "http://erieshare/*"
   ],
   "background": {
     "service_worker": "sw.js"
@@ -45,6 +46,14 @@
       "js": ["cc.js"],
       "run_at": "document_idle",
       "all_frames": true
-    }
+    },
+   {
+  "matches": [
+    "http://erieshare/sites/formsmgmt/CommlForms/_layouts/15/FormServer.aspx*"
+  ],
+  "js": ["content.js"],
+  "run_at": "document_idle",
+  "all_frames": true
+}
   ]
 }
