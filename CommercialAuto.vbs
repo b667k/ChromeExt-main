@@ -206,7 +206,7 @@ End Function
 
 ' Opens ClaimCenter via Chrome extension to get driver name, then opens CUW134 with all params
 Sub OpenNoDriverWithClaimCenter(ByVal pubc6, ByVal puurText41, ByVal dolSlash, ByVal claimNum)
-  Dim sh, ccUrl, finalUrl
+  Dim sh, ccUrl
   
   Set sh = CreateObject("WScript.Shell")
   
@@ -215,7 +215,14 @@ Sub OpenNoDriverWithClaimCenter(ByVal pubc6, ByVal puurText41, ByVal dolSlash, B
   ' 2. Navigate to Loss Details
   ' 3. Get driver name
   ' 4. Open CUW134 with all 4 parameters (x, t3, t4, t5)
-  ccUrl = CC_BASE_URL & "?claimNumber=" & UrlEncodeBasic(claimNum) & "&TargetPage=" & TARGET_PAGE_LOSS_DETAILS
+  '    (we pass x/t3/t5 + openCUW134=1 here so cc.js can carry them through)
+  ccUrl = CC_BASE_URL
+  ccUrl = AppendQueryParam(ccUrl, "claimNumber", claimNum)
+  ccUrl = AppendQueryParam(ccUrl, "TargetPage", TARGET_PAGE_LOSS_DETAILS)
+  ccUrl = AppendQueryParam(ccUrl, "x", pubc6)
+  ccUrl = AppendQueryParam(ccUrl, "t3", puurText41)
+  ccUrl = AppendQueryParam(ccUrl, "t5", dolSlash)
+  ccUrl = AppendQueryParam(ccUrl, "openCUW134", "1")
   
   ' Open ClaimCenter - Chrome extension will handle the rest
   ' It will get driver from Loss Details, combine with our x/t3/t5, and open CUW134
