@@ -218,39 +218,56 @@
     }
   }
 
+  // Track if section already exists to prevent duplicates
+  let sectionCreated = false;
+
   function ensureContainer() {
-    let section = document.querySelector("#tm-custom-mainframe-section");
-    let c = document.querySelector("#tm-custom-mainframe-buttons");
-
-    if (!section) {
-      section = document.createElement("div");
-      section.id = "tm-custom-mainframe-section";
-      section.className = "row top-buffer col-xs-12";
-      section.style.marginTop = "10px";
-      section.innerHTML = `
-        <label class="row paddingleftVI">Custom Scripts</label>
-        <div class="row paddingleftVI">
-          <div class="col-xs-12 top-buffer" id="tm-custom-mainframe-buttons" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-right: 0px;">
-          </div>
-        </div>
-      `;
-
-      const puurInput = document.querySelector('input[value="LoadPUUR"]');
-      const puurDiv = puurInput ? puurInput.closest("div.row.top-buffer.col-xs-12") : null;
-      if (puurDiv) puurDiv.parentNode.insertBefore(section, puurDiv.nextSibling);
-      else (document.body || document.documentElement).appendChild(section);
-
-      c = section.querySelector("#tm-custom-mainframe-buttons");
-    }
-
-    if (!c) {
-      c = document.querySelector("#tm-custom-mainframe-buttons");
-      if (!c) {
-        c = document.createElement("div");
-        c.id = "tm-custom-mainframe-buttons";
-        (document.body || document.documentElement).appendChild(c);
+    // Check if section already exists first - if so, just return existing buttons container
+    let existingSection = document.querySelector("#tm-custom-mainframe-section");
+    if (existingSection) {
+      let c = existingSection.querySelector("#tm-custom-mainframe-buttons");
+      if (c) {
+        existingSection.style.marginBottom = "25px";
+        c.style.display = "flex";
+        c.style.flexWrap = "wrap";
+        c.style.alignItems = "center";
+        c.style.gap = "8px";
+        c.style.paddingRight = "0";
+        return c;
       }
     }
+
+    // If we get here, section doesn't exist - check if we already created one this session
+    if (sectionCreated) {
+      // Try once more to find existing section
+      existingSection = document.querySelector("#tm-custom-mainframe-section");
+      if (existingSection) {
+        let c = existingSection.querySelector("#tm-custom-mainframe-buttons");
+        if (c) return c;
+      }
+    }
+
+    // Create new section
+    const section = document.createElement("div");
+    section.id = "tm-custom-mainframe-section";
+    section.className = "row top-buffer col-xs-12";
+    section.style.marginTop = "10px";
+    section.innerHTML = `
+      <label class="row paddingleftVI">Custom Scripts</label>
+      <div class="row paddingleftVI">
+        <div class="col-xs-12 top-buffer" id="tm-custom-mainframe-buttons" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-right: 0px;">
+        </div>
+      </div>
+    `;
+
+    const puurInput = document.querySelector('input[value="LoadPUUR"]');
+    const puurDiv = puurInput ? puurInput.closest("div.row.top-buffer.col-xs-12") : null;
+    if (puurDiv) puurDiv.parentNode.insertBefore(section, puurDiv.nextSibling);
+    else (document.body || document.documentElement).appendChild(section);
+
+    sectionCreated = true;
+    
+    const c = section.querySelector("#tm-custom-mainframe-buttons");
 
     section.style.marginBottom = "25px";
     c.style.display = "flex";
@@ -537,13 +554,25 @@ End Sub`;
     }
   }
 
+  // Track if tryAdd is currently running to prevent race conditions
+  let tryAddRunning = false;
+
   function tryAdd() {
     if (!alive) return;
-    const c = ensureContainer();
-    normalizeExistingWrappers(c);
-    addButtons(c);
-    checkPaAutoTriggers();
-    runAutoDropdown();
+    
+    // Prevent multiple concurrent runs
+    if (tryAddRunning) return;
+    tryAddRunning = true;
+    
+    try {
+      const c = ensureContainer();
+      normalizeExistingWrappers(c);
+      addButtons(c);
+      checkPaAutoTriggers();
+      runAutoDropdown();
+    } finally {
+      tryAddRunning = false;
+    }
   }
 
   // ✅ Live updates without reload:
@@ -582,7 +611,7 @@ End Sub`;
 
   tryAdd();
 
-  // Throttled observer
+  // Throttled observer - increased delay to reduce rapid firings
   let scheduled = false;
   const observer = new MutationObserver(() => {
     if (!alive || scheduled) return;
@@ -590,7 +619,7 @@ End Sub`;
     setTimeout(() => {
       scheduled = false;
       tryAdd();
-    }, 200);
+    }, 500); // Increased from 200ms to 500ms to reduce rapid firings
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });

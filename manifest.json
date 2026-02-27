@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Portal ↔ ClaimCenter Automation",
   "author": "Blaine Oler & Isaac Trost",
-  "version": "1.8.8",
+  "version": "1.9.0",
   "description": "Opens ClaimCenter from Portal and automates claim search.",
 
   "icons": {
